@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Panorama",
+  "version": "0.1.0",
+  "identifier": "com.panorama.tv",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "msi"
+    ],
+    "publisher": "Panorama",
+    "category": "Entertainment",
+    "shortDescription": "A lean-back, controller-first YouTube client for ultrawide displays",
+    "longDescription": "Panorama is a 10-foot, controller-driven interface for YouTube built on the official YouTube Data API and IFrame Player.",
+    "copyright": "",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "wix": {
+        "language": "en-US",
+        "upgradeCode": "7b1d3c2e-5f4a-4e8b-9c61-2a7d0e4f9b13"
+      }
+    }
+  }
+}

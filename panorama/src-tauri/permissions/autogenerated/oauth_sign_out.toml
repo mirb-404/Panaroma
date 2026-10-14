@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-oauth-sign-out"
+description = "Enables the oauth_sign_out command without any pre-configured scope."
+commands.allow = ["oauth_sign_out"]
+
+[[permission]]
+identifier = "deny-oauth-sign-out"
+description = "Denies the oauth_sign_out command without any pre-configured scope."
+commands.deny = ["oauth_sign_out"]

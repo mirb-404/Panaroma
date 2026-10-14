@@ -1,0 +1,28 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window (served from localhost in release builds)",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:47801/*",
+      "http://localhost:47811/*",
+      "http://localhost:47821/*",
+      "http://localhost:47831/*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "store:default",
+    "allow-app-ready",
+    "allow-set-fullscreen",
+    "allow-is-fullscreen",
+    "allow-quit-app",
+    "allow-oauth-sign-in",
+    "allow-oauth-refresh",
+    "allow-oauth-sign-out"
+  ]
+}
