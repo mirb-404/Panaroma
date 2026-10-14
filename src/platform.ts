@@ -99,3 +99,12 @@ export async function fileSrc(path: string): Promise<string> {
   const { convertFileSrc } = await import("@tauri-apps/api/core");
   return convertFileSrc(path);
 }
+
+/** Shows a youtube.com page in Panorama's in-app YouTube view (the fallback UI). */
+export async function openYouTube(path: string): Promise<void> {
+  if (!isTauri) {
+    window.open(`https://www.youtube.com${path}`, "_blank", "noopener");
+    return;
+  }
+  await invoke("yt_open_view", { path });
+}

@@ -31,6 +31,7 @@
     "allow-yt-open-sign-in",
     "allow-yt-close-sign-in",
     "allow-yt-sign-out",
-    "allow-yt-channel-feeds"
+    "allow-yt-channel-feeds",
+    "allow-yt-open-view"
   ]
 }

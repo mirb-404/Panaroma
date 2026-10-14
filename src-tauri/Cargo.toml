@@ -1,6 +1,6 @@
 [package]
 name = "panorama"
-version = "0.1.0"
+version = "0.2.0"
 description = "Panorama - controller-first YouTube client"
 authors = ["Panorama"]
 edition = "2024"
@@ -27,7 +27,7 @@ tauri-plugin-store = "2.5.0"
 tauri-plugin-single-instance = "2.5.3"
 gilrs = "0.11.2"
 url = "2.5.8"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["brotli", "gzip", "http2", "json", "rustls-tls"] }
 tauri-plugin-dialog = "2.8.2"
 sha1 = "0.10"
 

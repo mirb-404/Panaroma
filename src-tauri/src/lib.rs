@@ -16,7 +16,10 @@ use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEven
 /// and IndexedDB are keyed by origin; fallbacks only kick in if it's taken.
 const PORTS: [u16; 4] = [47801, 47811, 47821, 47831];
 
-const BROWSER_ARGS: &str = concat!(
+/// WebView2 options for every window. They must be identical across windows:
+/// all windows share one browser profile, and WebView2 refuses to create a
+/// webview whose options differ from the profile's running instance.
+pub(crate) const BROWSER_ARGS: &str = concat!(
     // Tauri's defaults (replaced wholesale when this is set).
     "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection ",
     "--autoplay-policy=no-user-gesture-required ",
@@ -132,6 +135,7 @@ pub fn run() {
             youtube::yt_close_sign_in,
             youtube::yt_sign_out,
             youtube::yt_channel_feeds,
+            youtube::yt_open_view,
             media::steam_sounds_available,
             media::read_steam_sound,
             media::import_startup_video,

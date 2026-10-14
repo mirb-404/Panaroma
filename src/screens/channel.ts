@@ -22,6 +22,7 @@ export function channelScreen(id: string) {
       { title: "Playlists", load: () => api.channelPlaylists(id) },
     ],
     empty: errorPanel,
+    youtubePath: `/channel/${id}`,
   });
   const show = view.onShow.bind(view);
   view.onShow = () => {

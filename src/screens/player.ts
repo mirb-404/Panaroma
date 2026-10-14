@@ -6,7 +6,7 @@ import * as api from "../api";
 import { decodeEntities, fmtDuration, h } from "../dom";
 import type { ActionEvent } from "../input";
 import { flip } from "../motion";
-import { openExternal } from "../platform";
+import { isTauri, listen, openYouTube } from "../platform";
 import type { Screen } from "../router";
 import { openChannel } from "../routes";
 import { settings } from "../settings";
@@ -21,7 +21,8 @@ declare global {
 }
 
 let apiReady: Promise<any> | null = null;
-function loadIframeApi(): Promise<any> {
+/** Loads YouTube's IFrame API once (also called at startup to warm it up). */
+export function loadIframeApi(): Promise<any> {
   apiReady ??= new Promise((resolve, reject) => {
     if (window.YT?.Player) return resolve(window.YT);
     window.onYouTubeIframeAPIReady = () => resolve(window.YT);
@@ -36,6 +37,62 @@ function loadIframeApi(): Promise<any> {
   return apiReady;
 }
 
+/**
+ * Controls a player iframe that is already connected — an adopted preview.
+ * YouTube's player only performs its API handshake once, so `new YT.Player()`
+ * can't attach to it again; this speaks the same postMessage protocol over the
+ * connection the preview opened, exposing the subset of the YT.Player
+ * interface this screen uses.
+ */
+class AdoptedPlayer {
+  private info: Record<string, any> = {};
+  private onMessage = (e: MessageEvent) => {
+    if (e.origin !== YT_ORIGIN || e.source !== this.frame.contentWindow) return;
+    let d: any;
+    try {
+      d = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+    } catch {
+      return;
+    }
+    if ((d?.event === "infoDelivery" || d?.event === "initialDelivery") && d.info) {
+      const before = this.info.playerState;
+      Object.assign(this.info, d.info);
+      if (d.info.playerState !== undefined && d.info.playerState !== before) this.events.onStateChange({ data: d.info.playerState });
+    } else if (d?.event === "onError") this.events.onError({ data: d.info });
+  };
+
+  constructor(
+    private frame: HTMLIFrameElement,
+    private events: { onStateChange: (e: any) => void; onError: (e: any) => void },
+    currentTime = 0,
+  ) {
+    // Adopted previews are playing; changes arrive as deltas from here on.
+    this.info.playerState = 1;
+    this.info.currentTime = currentTime;
+    window.addEventListener("message", this.onMessage);
+  }
+
+  private cmd(func: string, args: unknown[] = []) {
+    this.frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args, id: 1, channel: "widget" }), YT_ORIGIN);
+  }
+
+  playVideo() { this.cmd("playVideo"); }
+  pauseVideo() { this.cmd("pauseVideo"); }
+  seekTo(t: number, allowSeekAhead: boolean) { this.info.currentTime = t; this.cmd("seekTo", [t, allowSeekAhead]); }
+  getCurrentTime(): number { return this.info.currentTime ?? 0; }
+  getDuration(): number { return this.info.duration ?? 0; }
+  getVolume(): number { return this.info.volume ?? 100; }
+  setVolume(v: number) { this.info.volume = v; this.cmd("setVolume", [v]); }
+  isMuted(): boolean { return !!this.info.muted; }
+  mute() { this.info.muted = true; this.cmd("mute"); }
+  unMute() { this.info.muted = false; this.cmd("unMute"); }
+  loadVideoById(id: string) { this.info.currentTime = 0; this.cmd("loadVideoById", [id, 0]); }
+  setSize(w: number, h: number) { this.frame.width = String(w); this.frame.height = String(h); }
+  destroy() { window.removeEventListener("message", this.onMessage); this.frame.remove(); }
+}
+
+const YT_ORIGIN = "https://www.youtube.com";
+
 const enum State {
   Ended = 0,
   Playing = 1,
@@ -45,7 +102,11 @@ const enum State {
 
 type Layout = "split" | "theater";
 
-export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
+/**
+ * `handoff`: a preview player that is already playing this video. It is moved
+ * into the player (without reloading) and unmuted, so playback just continues.
+ */
+export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, handoff?: HTMLIFrameElement): Screen {
   let pos = Math.max(0, queue.findIndex((v) => v.id === first.id));
   if (!queue.length) queue = [first];
   let current = queue[pos];
@@ -242,11 +303,49 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
     try {
       const YT = await loadIframeApi();
       if (destroyed) return;
+      const events = {
+        onReady: () => {
+          if (adopted) {
+            player.unMute();
+            player.setVolume(100);
+          }
+          player.playVideo();
+          refocusApp();
+        },
+        onStateChange: (e: any) => {
+          state = e.data;
+          el.classList.toggle("playing", state === State.Playing);
+          if (state === State.Playing) rezoomTimer = window.setTimeout(() => setUnzoomed(false), 600);
+          else if (state !== State.Buffering) setUnzoomed(true);
+          if (state === State.Ended) onEnded();
+          tickProgress();
+        },
+        onError: (e: any) => onError(e.data),
+      };
+      // Netflix-style continuation: adopt the playing preview. `moveBefore`
+      // moves an iframe without reloading it; elsewhere, start fresh below.
+      const adopted = !!handoff && handoff.isConnected && "moveBefore" in Element.prototype;
+      if (adopted) {
+        (videoBox as any).moveBefore(handoff, host);
+        host.remove();
+        handoff!.className = "";
+        player = new AdoptedPlayer(handoff!, events, startAt);
+        sizeVideo();
+        events.onReady();
+        // The preview was playing; the player only reports changes, so it won't
+        // say so again. Start from "playing".
+        events.onStateChange({ data: State.Playing });
+        progressTimer = window.setInterval(tickProgress, 250);
+        return;
+      }
+      handoff?.remove();
       player = new YT.Player(host, {
         videoId: current.id,
         width: videoBox.clientWidth,
         height: videoBox.clientHeight,
         playerVars: {
+          // Continue a preview: whole seconds, a moment early so nothing is missed.
+          start: Math.max(0, Math.floor(startAt) - 1),
           autoplay: 1,
           controls: 1,
           rel: 0,
@@ -257,21 +356,7 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
           origin: location.origin,
           hl: navigator.language,
         },
-        events: {
-          onReady: () => {
-            player.playVideo();
-            refocusApp();
-          },
-          onStateChange: (e: any) => {
-            state = e.data;
-            el.classList.toggle("playing", state === State.Playing);
-            if (state === State.Playing) rezoomTimer = window.setTimeout(() => setUnzoomed(false), 600);
-            else if (state !== State.Buffering) setUnzoomed(true);
-            if (state === State.Ended) onEnded();
-            tickProgress();
-          },
-          onError: (e: any) => onError(e.data),
-        },
+        events,
       });
       progressTimer = window.setInterval(tickProgress, 250);
     } catch (e) {
@@ -306,13 +391,33 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
   function onError(code: number) {
     errored = true;
     const embedBlocked = code === 101 || code === 150 || code === 153;
-    const msg = embedBlocked
-      ? "The creator doesn't allow this video to play outside YouTube. Press Ⓧ to open it on YouTube."
-      : code === 100
-        ? "This video is unavailable."
-        : `Playback error (${code}).`;
-    toast(msg, "error", 5000);
+    if (embedBlocked && isTauri) {
+      // Some creators only allow playback on youtube.com: play it there, in
+      // Panorama's YouTube view, and continue the queue when the user comes back.
+      toast("This video only plays on YouTube — opening it there");
+      openWatchView(current.id);
+      return;
+    }
+    toast(code === 100 ? "This video is unavailable." : `Playback error (${code}).`, "error", 5000);
     if (pos < queue.length - 1) autoNext = window.setTimeout(() => playAt(pos + 1), 4000);
+  }
+
+  let viewOpen = false;
+  let unlistenView: () => void = () => {};
+  function openWatchView(id: string) {
+    if (viewOpen) return;
+    viewOpen = true;
+    player?.pauseVideo?.();
+    openYouTube(`/watch?v=${id}`).catch((e) => {
+      viewOpen = false;
+      toast(String(e), "error");
+    });
+    unlistenView();
+    listen("ytview-closed", () => {
+      if (!viewOpen || destroyed) return;
+      viewOpen = false;
+      if (errored && pos < queue.length - 1) playAt(pos + 1);
+    }).then((off) => (unlistenView = off));
   }
 
   function seekBy(delta: number) {
@@ -378,6 +483,7 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
     },
     onDestroy() {
       destroyed = true;
+      unlistenView();
       clearInterval(progressTimer);
       clearTimeout(autoNext);
       clearTimeout(seekCommit);
@@ -453,7 +559,7 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
           setFocus("queue");
           return true;
         case "alt":
-          if (errored) openExternal(`https://www.youtube.com/watch?v=${current.id}`);
+          if (errored) openWatchView(current.id);
           else if (player?.isMuted?.()) (player.unMute(), flash("Sound on"));
           else (player?.mute?.(), flash("Muted"));
           return true;

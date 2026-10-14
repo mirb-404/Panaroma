@@ -14,5 +14,6 @@ export function playlistScreen(p: api.Playlist) {
     header,
     rows: [{ title: "", layout: "grid", load: () => api.playlistVideos(p.id) }],
     empty: errorPanel,
+    youtubePath: `/playlist?list=${p.id}`,
   });
 }

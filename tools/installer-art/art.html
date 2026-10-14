@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- Installer artwork (rendered to src-tauri/installer/*.bmp by render.mjs).
+     WiX dialog: 493×312, the left 164px is the art panel; the installer draws its
+     text on the white area. Banner: 493×58, text on the left, logo on the right. -->
+<html><head><meta charset="utf-8"><style>
+  body { margin: 0; background: #fff; font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; }
+  .dialog { position: relative; width: 493px; height: 312px; background: #fff; overflow: hidden; }
+  .panel { position: absolute; inset: 0 auto 0 0; width: 164px;
+    background: radial-gradient(120% 70% at 0% 0%, #3a0c1a, transparent 60%), linear-gradient(160deg, #14080d, #08080b 55%, #120a14); }
+  .mark { position: absolute; left: 42px; top: 92px; width: 80px; height: 56px; border-radius: 15px;
+    background: linear-gradient(135deg, #ff6a5e, #ff2d55 55%, #9c0f4a); box-shadow: 0 10px 30px rgba(255, 45, 85, .45); }
+  .mark::after { content: ""; position: absolute; inset: 0; margin: auto; width: 0; height: 0;
+    border-left: 20px solid #fff; border-top: 12px solid transparent; border-bottom: 12px solid transparent; transform: translateX(3px); }
+  .word { position: absolute; left: 0; width: 164px; top: 166px; text-align: center; color: #fff;
+    font-weight: 700; font-size: 19px; letter-spacing: .14em; }
+  .tv { display: block; margin-top: 4px; font-weight: 300; font-size: 13px; letter-spacing: .3em; color: rgba(255,255,255,.7); }
+  .banner { position: relative; width: 493px; height: 58px; background: #fff; overflow: hidden; margin-top: 20px; }
+  .banner .mark { left: auto; right: 14px; top: 11px; width: 52px; height: 36px; border-radius: 10px; box-shadow: 0 4px 12px rgba(255,45,85,.35); }
+  .banner .mark::after { border-left-width: 13px; border-top-width: 8px; border-bottom-width: 8px; transform: translateX(2px); }
+</style></head><body>
+  <div class="dialog" id="dialog"><div class="panel"><div class="mark"></div><div class="word">PANORAMA<span class="tv">TV</span></div></div></div>
+  <div class="banner" id="banner"><div class="mark"></div></div>
+</body></html>

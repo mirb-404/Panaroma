@@ -131,7 +131,12 @@ window.addEventListener(
   { passive: true },
 );
 
-// ---- controller (native, via Rust) ---------------------------------------------
+// ---- controllers ---------------------------------------------------------------
+// Two sources, one action stream:
+//  1. The web Gamepad API (primary). Chromium/WebView2 maps Xbox, DualShock 4,
+//     DualSense, Switch Pro and most HID pads to the W3C "standard" layout.
+//  2. Native input from Rust (gilrs), used only while the web API sees no pad,
+//     so a press is never delivered twice.
 
 const PAD: Record<string, Action> = {
   Up: "up",
@@ -151,6 +156,25 @@ const PAD: Record<string, Action> = {
   RS: "fullscreen",
 };
 
+/** W3C standard-mapping button indices (Xbox labels; PlayStation ✕ ○ □ △ map to A B X Y). */
+const STANDARD: Record<number, string> = {
+  0: "A",
+  1: "B",
+  2: "X",
+  3: "Y",
+  4: "LB",
+  5: "RB",
+  6: "LT",
+  7: "RT",
+  8: "View",
+  9: "Menu",
+  11: "RS",
+  12: "Up",
+  13: "Down",
+  14: "Left",
+  15: "Right",
+};
+
 type PadEvent =
   | { type: "down" | "up"; button: string }
   | { type: "axis"; axis: string; value: number }
@@ -162,17 +186,75 @@ export function onPadStatus(fn: (e: PadEvent) => void) {
   padListener = fn;
 }
 
+const webPads = () => (navigator.getGamepads?.() ?? []).filter((p): p is Gamepad => !!p && p.connected);
+
 export async function initPad() {
+  // Native events: only when the web API can't see a controller.
   await listen<PadEvent>("pad", (e) => {
     if (e.type === "down") {
+      if (webPads().length) return;
       const a = PAD[e.button];
       if (a) press(`p:${e.button}`, a, "pad");
     } else if (e.type === "up") {
       release(`p:${e.button}`);
-    } else {
+    } else if (!webPads().length) {
       padListener(e);
     }
   });
+
+  window.addEventListener("gamepadconnected", (e) => {
+    padListener({ type: "connected", name: friendlyName(e.gamepad.id) });
+    // Hand over from native input: release anything it still holds.
+    for (const id of [...held.keys()]) if (id.startsWith("p:")) release(id);
+  });
+  window.addEventListener("gamepaddisconnected", () => padListener({ type: "disconnected" }));
+  requestAnimationFrame(pollWebPads);
+}
+
+/** "Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" → "Wireless Controller" */
+function friendlyName(id: string): string {
+  return id.replace(/\s*\(.*$/, "").trim() || "Controller";
+}
+
+// Stick hysteresis, as on the native side: press past 0.55, release under 0.35.
+const PRESS = 0.55;
+const RELEASE = 0.35;
+const padState = new Map<number, Set<string>>();
+
+function pollWebPads() {
+  // Only the focused app window takes controller input.
+  if (document.hasFocus()) {
+    for (const gp of webPads()) {
+      const prev = padState.get(gp.index);
+      const now = new Set<string>();
+      const standard = gp.mapping === "standard";
+      gp.buttons.forEach((b, i) => {
+        const name = standard ? STANDARD[i] : i < 4 ? STANDARD[i] : undefined;
+        const threshold = name === "LT" || name === "RT" ? 0.4 : 0.5;
+        if (name && (b.pressed || b.value > threshold)) now.add(name);
+      });
+      const [lx = 0, ly = 0] = gp.axes;
+      const stick = (neg: string, pos: string, v: number) => {
+        const was = prev?.has(neg) ? -1 : prev?.has(pos) ? 1 : 0;
+        if (was === 1 ? v > RELEASE : v >= PRESS) now.add(pos);
+        else if (was === -1 ? v < -RELEASE : v <= -PRESS) now.add(neg);
+      };
+      stick("Left", "Right", lx);
+      stick("Up", "Down", ly);
+      // A pad seen for the first time: adopt its current state silently so a
+      // button already held (e.g. the press that woke the API) isn't repeated.
+      if (prev) {
+        for (const n of now) if (!prev.has(n) && PAD[n]) press(`w${gp.index}:${n}`, PAD[n], "pad");
+        for (const n of prev) if (!now.has(n)) release(`w${gp.index}:${n}`);
+      }
+      padState.set(gp.index, now);
+    }
+  } else if (padState.size) {
+    // Focus lost mid-hold: release everything so nothing keeps repeating.
+    for (const id of [...held.keys()]) if (id.startsWith("w")) release(id);
+    padState.clear();
+  }
+  requestAnimationFrame(pollWebPads);
 }
 
 /** Light haptic tick through the web Gamepad API when the pad exposes one. */

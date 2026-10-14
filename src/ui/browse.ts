@@ -2,6 +2,7 @@
 // either a horizontally-scrolling shelf or a static grid row. Focus is spatial,
 // each shelf remembers its position, and all scrolling is spring-driven
 // transforms (no layout per frame).
+import * as api from "../api";
 import { ApiError, type Item, type Video } from "../api";
 import { decodeEntities, h } from "../dom";
 import type { ActionEvent } from "../input";
@@ -10,6 +11,7 @@ import { edgeBump, type Screen } from "../router";
 import { openItem } from "../routes";
 import { card, loadCardImage, skeletonCards, type CardEl } from "./card";
 import { setBackdrop } from "./chrome";
+import { cancelPreview, previewTime, schedulePreview, takePreview } from "./preview";
 
 export interface RowSpec {
   title: string;
@@ -26,7 +28,9 @@ export interface BrowseOptions {
   header?: HTMLElement;
   rows: RowSpec[];
   /** Shown when every row is empty or failed. */
-  empty?: (err: unknown) => { el: HTMLElement; onAction(e: ActionEvent): boolean };
+  empty?: (err: unknown, youtubePath?: string) => { el: HTMLElement; onAction(e: ActionEvent): boolean };
+  /** The equivalent youtube.com page, offered as a fallback when loading fails. */
+  youtubePath?: string;
   onFocusItem?: (item: Item) => void;
 }
 
@@ -58,6 +62,7 @@ export class BrowseView implements Screen {
   private visible = true;
   private resizeObs: ResizeObserver;
   private focusedEl?: HTMLElement;
+  private prefetchTimer = 0;
 
   constructor(private opts: BrowseOptions) {
     this.rowsEl = h("div.rows");
@@ -169,6 +174,25 @@ export class BrowseView implements Screen {
         }
       }),
     );
+    // Mouse hover previews (controller focus previews are started in syncFocus).
+    row.cards.forEach((c, i) => {
+      const it = items[i];
+      if (it.kind !== "video") return;
+      c.addEventListener("mouseenter", () => {
+        if (!this.visible) return;
+        if (this.opts.hero) {
+          // Hero screens: hovering focuses the card, so the hero (title +
+          // preview) always describes what's under the pointer.
+          const ri = this.rows.indexOf(row);
+          if (ri >= 0 && (ri !== this.r || row.idx !== i)) {
+            this.r = ri;
+            row.idx = i;
+            this.syncFocus();
+          }
+        } else schedulePreview(it.id, c.querySelector(".thumb")!);
+      });
+      if (!this.opts.hero) c.addEventListener("mouseleave", () => cancelPreview());
+    });
     row.track.replaceChildren(...row.cards);
     row.el.classList.remove("loading");
     row.stride = 0;
@@ -196,7 +220,7 @@ export class BrowseView implements Screen {
     if (--this.pending > 0 || this.rows.length) return;
     const err = this.lastErr ?? new ApiError("Nothing here yet", 0, "empty");
     if (this.opts.empty) {
-      this.emptyPanel = this.opts.empty(err);
+      this.emptyPanel = this.opts.empty(err, this.opts.youtubePath);
       this.el.append(this.emptyPanel.el);
       this.heroEl?.replaceChildren();
     }
@@ -207,7 +231,10 @@ export class BrowseView implements Screen {
     const at = row.offset + i;
     const item = row.items[i];
     const queue = all.slice(at).filter((x): x is Video => x.kind === "video");
-    openItem(item, queue);
+    // Netflix-style: hand the playing preview to the player (seamless), or at
+    // least continue from where the preview got to.
+    if (item.kind === "video") openItem(item, queue, previewTime(item.id), takePreview(item.id) ?? undefined);
+    else openItem(item, queue);
   }
 
   // ---- focus & motion ------------------------------------------------------------
@@ -269,6 +296,13 @@ export class BrowseView implements Screen {
     this.loadNearbyImages();
     const item = row.items[row.idx];
     if (item) this.focusItem(item);
+    // Resting focus on a video previews it, like hovering does.
+    if (this.visible && c && item?.kind === "video" && !this.el.closest(".inactive")) {
+      schedulePreview(item.id, this.opts.hero ? undefined : c.querySelector(".thumb")!);
+      clearTimeout(this.prefetchTimer);
+      this.prefetchTimer = window.setTimeout(() => api.watchNext(item.id).catch(() => {}), 400);
+    }
+    else cancelPreview();
   }
 
   private loadNearbyImages() {
@@ -325,6 +359,7 @@ export class BrowseView implements Screen {
 
   onHide() {
     this.visible = false;
+    cancelPreview();
   }
 
   onDestroy() {

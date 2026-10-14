@@ -1625,3 +1625,50 @@ body.rail-open .stage {
 .wizard-btn.primary {
   background: rgba(255, 61, 72, 0.3);
 }
+
+/* ---- inline previews --------------------------------------------------------- */
+
+/* Taller than the 16:9 box: the player letterboxes the video, and its title
+   bar sits in the top band, which is cropped away. */
+.preview-frame {
+  position: absolute;
+  left: 0;
+  top: -9%;
+  width: 100%;
+  height: 118%;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s var(--ease);
+}
+
+.preview-frame.shown {
+  opacity: 1;
+}
+
+/* Hero-area previews: same box and edge fades as the backdrop image. */
+.backdrop-video {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(82vw, calc(80vh * 16 / 9));
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 38%), linear-gradient(to bottom, #000 45%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to right, transparent 0%, #000 38%), linear-gradient(to bottom, #000 45%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.backdrop-video .preview-frame {
+  transition: opacity 0.6s var(--ease);
+}
+
+/* Fade the still image out under a playing preview. */
+.backdrop:has(.backdrop-video.previewing) .backdrop-img.shown {
+  opacity: 0;
+}
+
+body.immersive .backdrop-video .preview-frame {
+  display: none;
+}

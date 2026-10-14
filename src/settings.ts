@@ -9,6 +9,8 @@ export interface Settings {
   autoplayNext: boolean;
   /** Zoom 16:9 video to fill ultrawide screens (theater layout). */
   ultrawideFill: boolean;
+  /** Play muted previews when hovering or resting focus on a video. */
+  hoverPreview: boolean;
   /** What plays at launch: the Panorama startup movie, the user's own video, or nothing. */
   startup: "default" | "video" | "off";
   /** Imported copy of the user's startup video (in app data). */
@@ -31,6 +33,7 @@ const defaults: Settings = {
   uiScale: 1,
   autoplayNext: true,
   ultrawideFill: true,
+  hoverPreview: true,
   startup: "default",
   startupVideo: "",
   startupVideoVersion: 0,

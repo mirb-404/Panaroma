@@ -4,6 +4,7 @@ import type { ActionEvent } from "../input";
 import { router, TABS, type TabId } from "../router";
 import { settings } from "../settings";
 import { cue } from "../sound";
+import { setHeroPreviewHost } from "./preview";
 
 // ---- backdrop ------------------------------------------------------------------
 // Two stacked layers; the incoming image is fully decoded off-thread before it
@@ -14,7 +15,9 @@ let front = 0;
 let wanted = "";
 let timer = 0;
 
-export const backdropEl = h("div.backdrop", null, ...layers, h("div.backdrop-shade"));
+const heroVideo = h("div.backdrop-video");
+setHeroPreviewHost(heroVideo);
+export const backdropEl = h("div.backdrop", null, ...layers, heroVideo, h("div.backdrop-shade"));
 
 export function setBackdrop(url: string | null, immediate = false) {
   url ??= "";

@@ -11,6 +11,7 @@ import { homeScreen, libraryScreen, subscriptionsScreen } from "./screens/tabs";
 import { loadSettings, settings, updateSettings } from "./settings";
 import { applyScale, backdropEl, createClock, createRail, toast, toastHost } from "./ui/chrome";
 import { playStartup } from "./ui/intro";
+import { loadIframeApi } from "./screens/player";
 import { signInFlow } from "./screens/common";
 import { loadSounds } from "./sound";
 import { confirmDialog } from "./ui/textentry";
@@ -84,6 +85,7 @@ async function main() {
   });
 
   router.showTab("home");
+  warmUp();
 
   initPad();
   onPadStatus((e) => {
@@ -98,6 +100,31 @@ async function main() {
     clearTimeout(idle);
     idle = window.setTimeout(() => document.body.classList.add("cursor-hidden"), 2500);
   });
+}
+
+/**
+ * Makes the first preview and the first video start faster: connections to
+ * YouTube's hosts are opened early, and the player code is downloaded once
+ * (by an invisible, muted, paused player) so later players load from cache.
+ */
+function warmUp() {
+  for (const href of ["https://www.youtube.com", "https://i.ytimg.com", "https://yt3.ggpht.com", "https://www.google.com"]) {
+    const link = document.createElement("link");
+    link.rel = "preconnect";
+    link.href = href;
+    document.head.append(link);
+  }
+  setTimeout(() => {
+    loadIframeApi().catch(() => {});
+    const params = new URLSearchParams({ autoplay: "0", mute: "1", controls: "1", rel: "0", playsinline: "1", enablejsapi: "1", origin: location.origin });
+    const frame = document.createElement("iframe");
+    frame.src = `https://www.youtube.com/embed/aqz-KE-bpKQ?${params}`;
+    frame.tabIndex = -1;
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText = "position:fixed;left:-10000px;top:0;width:320px;height:180px;opacity:0;pointer-events:none";
+    document.body.append(frame);
+    setTimeout(() => frame.remove(), 10_000);
+  }, 1500);
 }
 
 main().catch((e) => {

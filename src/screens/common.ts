@@ -2,10 +2,11 @@ import { ApiError } from "../api";
 import { canSignIn, cancelSignIn, signIn } from "../auth";
 import { messagePanel, router } from "../router";
 import { toast } from "../ui/chrome";
+import { openYouTube } from "../platform";
 import { openSignInWait } from "../ui/signin";
 
 /** Maps a load failure to a helpful full-screen message with a next step. */
-export function errorPanel(err: unknown) {
+export function errorPanel(err: unknown, youtubePath?: string) {
   const reason = err instanceof ApiError ? err.reason : "";
   const msg = err instanceof Error ? err.message : String(err);
   if (reason === "signedOut")
@@ -15,7 +16,10 @@ export function errorPanel(err: unknown) {
         ])
       : messagePanel("Welcome to Panorama", "Signing in needs the Panorama desktop app.", []);
   if (reason === "empty") return messagePanel("Nothing here yet", "", []);
-  return messagePanel("Couldn't load this", msg, [{ label: "Retry", run: () => router.resetTab(router.tab) }]);
+  const actions = [{ label: "Retry", run: () => router.resetTab(router.tab) }];
+  // ytmdesktop's principle: YouTube's own page always works.
+  if (youtubePath && canSignIn()) actions.push({ label: "Open on YouTube", run: () => void openYouTube(youtubePath) });
+  return messagePanel("Couldn't load this", msg, actions);
 }
 
 let signingIn = false;

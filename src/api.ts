@@ -4,7 +4,7 @@
 // Responses are deep, renderer-based JSON whose layout shifts over time, so
 // parsing walks the whole tree and recognizes item renderers wherever they are
 // instead of depending on exact paths.
-import { cacheGet, cachePut } from "./cache";
+import { cacheEntry, cachePut } from "./cache";
 import { invoke } from "./platform";
 import { settings } from "./settings";
 
@@ -75,20 +75,32 @@ async function yt(endpoint: string, body: Record<string, unknown>, ttl: number):
     await new Promise((r) => setTimeout(r, 150 + Math.random() * 350));
     return demoResponse(endpoint, body);
   }
-  const hit = await cacheGet<Json>(key, ttl);
-  if (hit) return hit;
-  let res: Json;
-  try {
-    res = await invoke<Json>("yt_api", { endpoint, body, hl: navigator.language || "en", gl: settings().region });
-  } catch (e) {
-    const msg = String(e);
-    if (msg === "signedOut") throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
-    if (msg === "offline") throw new ApiError("You're offline", 0, "offline");
-    throw new ApiError(msg, 500);
+  const fetchFresh = async (): Promise<Json> => {
+    let res: Json;
+    try {
+      res = await invoke<Json>("yt_api", { endpoint, body, hl: navigator.language || "en", gl: settings().region });
+    } catch (e) {
+      const msg = String(e);
+      if (msg === "signedOut") throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
+      if (msg === "offline") throw new ApiError("You're offline", 0, "offline");
+      throw new ApiError(msg, 500);
+    }
+    cachePut(key, res);
+    return res;
+  };
+  const hit = await cacheEntry<Json>(key);
+  if (hit && hit.age < ttl) return hit.value;
+  // Stale-while-revalidate: show what we had instantly (up to a day old) and
+  // refresh in the background for next time. Continuation requests carry
+  // short-lived tokens, so they're always fetched fresh.
+  if (hit && hit.age < STALE_MAX && !("continuation" in body)) {
+    fetchFresh().catch(() => {});
+    return hit.value;
   }
-  cachePut(key, res);
-  return res;
+  return fetchFresh();
 }
+
+const STALE_MAX = 24 * 60 * MIN;
 
 // ---- tree helpers ---------------------------------------------------------------
 
@@ -271,6 +283,35 @@ function collect(node: Json, out: Item[] = [], depth = 0): Item[] {
   return out;
 }
 
+/**
+ * Last-resort extractor for when YouTube renames its item renderers: any object
+ * carrying an 11-character video id plus some title-ish text becomes a basic
+ * video card. Rows degrade to simpler cards instead of going empty.
+ */
+function genericVideos(node: Json): Video[] {
+  const out: Video[] = [];
+  const walk = (n: Json, depth: number) => {
+    if (!n || typeof n !== "object" || depth > 60) return;
+    if (Array.isArray(n)) return n.forEach((x) => walk(x, depth + 1));
+    const id = [n.videoId, n.contentId].find((x) => typeof x === "string" && /^[\w-]{11}$/.test(x));
+    if (id) {
+      const title =
+        tx(n.title) || tx(n.headline) || tx(n.metadata?.lockupMetadataViewModel?.title) || n.accessibility?.accessibilityData?.label || "";
+      out.push(video({ id, title, channelTitle: tx(n.ownerText ?? n.shortBylineText ?? n.longBylineText), thumb: largest(n.thumbnail?.thumbnails) }));
+      return;
+    }
+    for (const [k, v] of Object.entries(n)) if (!SKIP.has(k)) walk(v, depth + 1);
+  };
+  walk(node, 0);
+  return dedupe(out);
+}
+
+/** Items from a response: precise parsers first, the generic extractor if they find nothing. */
+function items(node: Json): Item[] {
+  const found = collect(node);
+  return found.length ? found : genericVideos(node);
+}
+
 interface Shelf {
   title: string;
   items: Item[];
@@ -316,7 +357,9 @@ async function paged(endpoint: "browse" | "search", body: Record<string, unknown
   const out = [await yt(endpoint, body, ttl)];
   let token = continuationOf(out[0]);
   while (token && out.length < pages) {
-    const next = await yt(endpoint, { continuation: token }, ttl);
+    // A failed extra page (e.g. an expired token) just means a shorter list.
+    const next = await yt(endpoint, { continuation: token }, ttl).catch(() => null);
+    if (!next) break;
     out.push(next);
     token = continuationOf(next);
   }
@@ -327,29 +370,45 @@ const videosOnly = (items: Item[]) => items.filter((i): i is Video => i.kind ===
 
 // ---- public queries ---------------------------------------------------------------
 
-let homeCache: Promise<{ loose: Item[]; shelves: Shelf[] }> | null = null;
+let homePages: Promise<Json | null>[] | null = null;
 let homeAt = 0;
 
-/** The signed-in Home feed: recommendations plus YouTube's titled shelves. */
-export function homeFeed(): Promise<{ loose: Item[]; shelves: Shelf[] }> {
-  if (!homeCache || Date.now() - homeAt > 10 * MIN) {
+/**
+ * The signed-in Home feed, page by page. Each page is its own promise so the
+ * first row renders as soon as page 1 arrives instead of waiting for all three.
+ */
+export function homeFeedPage(n: 0 | 1 | 2): Promise<Item[]> {
+  if (!homePages || Date.now() - homeAt > 10 * MIN) {
     homeAt = Date.now();
-    homeCache = paged("browse", { browseId: "FEwhat_to_watch" }, 3, 10 * MIN).then((pages) => {
-      const parts = pages.map(collectWithShelves);
-      return {
-        loose: dedupe(parts.flatMap((p) => p.loose)),
-        shelves: parts.flatMap((p) => p.shelves),
-      };
-    });
-    homeCache.catch(() => (homeCache = null));
+    const first = yt("browse", { browseId: "FEwhat_to_watch" }, 10 * MIN);
+    const next = (prev: Promise<Json | null>) =>
+      prev.then((r) => {
+        const token = r && continuationOf(r);
+        return token ? yt("browse", { continuation: token }, 10 * MIN).catch(() => null) : null;
+      });
+    const second = next(first);
+    homePages = [first, second, next(second)];
+    first.catch(() => (homePages = null));
   }
-  return homeCache;
+  const seen = new Set<string>();
+  return Promise.all(homePages.slice(0, n + 1)).then((pages) => {
+    // Items already shown on earlier pages are skipped.
+    pages.slice(0, n).forEach((p) => p && homeItems(p).forEach((i) => seen.add(i.id)));
+    const page = pages[n];
+    return page ? homeItems(page).filter((i) => !seen.has(i.id)) : [];
+  });
+}
+
+function homeItems(page: Json): Item[] {
+  const { loose, shelves } = collectWithShelves(page);
+  const found = dedupe([...loose, ...shelves.flatMap((s) => s.items)]);
+  return found.length ? found : genericVideos(page);
 }
 
 /** Subscribed channels, in the order YouTube lists them. */
 export async function subscribedChannels(): Promise<Channel[]> {
   const r = await yt("browse", { browseId: "FEsubscriptions" }, 60 * MIN);
-  return dedupe(collect(r).filter((i): i is Channel => i.kind === "channel"));
+  return dedupe(items(r).filter((i): i is Channel => i.kind === "channel"));
 }
 
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
@@ -374,7 +433,7 @@ function ago(iso: string): string {
  * from each channel's public RSS feed, merged newest first.
  */
 export async function subscriptionFeed(): Promise<Video[]> {
-  if (isDemo()) return videosOnly(collect(await yt("browse", { browseId: "FEdemo" }, 0)));
+  if (isDemo()) return videosOnly(items(await yt("browse", { browseId: "FEdemo" }, 0)));
   const channels = await subscribedChannels();
   const xmls = await invoke<string[]>("yt_channel_feeds", { ids: channels.slice(0, 60).map((c) => c.id) });
   const YT = "http://www.youtube.com/xml/schemas/2015";
@@ -405,12 +464,12 @@ export async function subscriptionFeed(): Promise<Video[]> {
 }
 
 export async function history(): Promise<Video[]> {
-  return dedupe(videosOnly(collect(await yt("browse", { browseId: "FEhistory" }, 5 * MIN))));
+  return dedupe(videosOnly(items(await yt("browse", { browseId: "FEhistory" }, 5 * MIN))));
 }
 
 export async function playlistVideos(playlistId: string): Promise<Video[]> {
   const pages = await paged("browse", { browseId: `VL${playlistId}` }, 3, 10 * MIN);
-  return dedupe(videosOnly(pages.flatMap((p) => collect(p))));
+  return dedupe(videosOnly(pages.flatMap((p) => items(p))));
 }
 
 export const watchLater = () => playlistVideos("WL");
@@ -418,14 +477,14 @@ export const likedVideos = () => playlistVideos("LL");
 
 export async function myPlaylists(): Promise<Playlist[]> {
   const pick = (r: Json) =>
-    collect(r).filter((i): i is Playlist => i.kind === "playlist" && !["WL", "LL"].includes(i.id));
-  const items = pick(await yt("browse", { browseId: "FEplaylist_aggregation" }, 10 * MIN).catch(() => null));
-  return items.length ? dedupe(items) : dedupe(pick(await yt("browse", { browseId: "FElibrary" }, 10 * MIN)));
+    items(r).filter((i): i is Playlist => i.kind === "playlist" && !["WL", "LL"].includes(i.id));
+  const found = pick(await yt("browse", { browseId: "FEplaylist_aggregation" }, 10 * MIN).catch(() => null));
+  return found.length ? dedupe(found) : dedupe(pick(await yt("browse", { browseId: "FElibrary" }, 10 * MIN)));
 }
 
 export async function search(query: string): Promise<Item[]> {
   const pages = await paged("search", { query }, 2, 60 * MIN);
-  return dedupe(pages.flatMap((p) => collect(p)));
+  return dedupe(pages.flatMap((p) => items(p)));
 }
 
 export async function channel(id: string): Promise<Channel> {
@@ -459,12 +518,12 @@ const PLAYLISTS_TAB = "EglwbGF5bGlzdHPyBgQKAkIA";
 
 export async function channelVideos(id: string): Promise<Video[]> {
   const pages = await paged("browse", { browseId: id, params: VIDEOS_TAB }, 2, 30 * MIN);
-  return dedupe(videosOnly(pages.flatMap((p) => collect(p))));
+  return dedupe(videosOnly(pages.flatMap((p) => items(p))));
 }
 
 export async function channelPlaylists(id: string): Promise<Playlist[]> {
   const r = await yt("browse", { browseId: id, params: PLAYLISTS_TAB }, 60 * MIN);
-  return dedupe(collect(r).filter((i): i is Playlist => i.kind === "playlist"));
+  return dedupe(items(r).filter((i): i is Playlist => i.kind === "playlist"));
 }
 
 /** Description and related videos for the player's side panel. */
@@ -473,7 +532,7 @@ export async function watchNext(videoId: string): Promise<{ description: string;
   const secondary = find(r, (x) => x?.videoSecondaryInfoRenderer);
   const description = tx(secondary?.attributedDescription) || tx(secondary?.description);
   const results = find(r, (x) => x?.secondaryResults) ?? {};
-  return { description, related: dedupe(videosOnly(collect(results))).filter((v) => v.id !== videoId) };
+  return { description, related: dedupe(videosOnly(items(results))).filter((v) => v.id !== videoId) };
 }
 
 export async function account(): Promise<Account | null> {

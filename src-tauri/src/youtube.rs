@@ -24,6 +24,23 @@ const ENDPOINTS: &[&str] = &["browse", "search", "next", "account/account_menu",
 
 static CLIENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
 
+/// One HTTP client for the app's lifetime: pooled keep-alive connections,
+/// HTTP/2 and compressed responses (YouTube's JSON shrinks ~10×).
+fn http() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent(UA)
+                .gzip(true)
+                .brotli(true)
+                .pool_idle_timeout(std::time::Duration::from_secs(90))
+                .build()
+                .expect("http client")
+        })
+        .clone()
+}
+
 fn main_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     app.get_webview_window("main").ok_or_else(|| "main window missing".to_string())
 }
@@ -111,7 +128,7 @@ pub async fn yt_api(app: AppHandle, endpoint: String, body: Value, hl: String, g
         return Err("signedOut".into());
     }
     let header = cookie_header(&cookies);
-    let http = reqwest::Client::new();
+    let http = http();
     let version = client_version(&http, &header).await;
 
     let mut payload = json!({
@@ -156,6 +173,7 @@ pub async fn yt_open_sign_in(app: AppHandle) -> Result<(), String> {
     let handle = app.clone();
     let window = WebviewWindowBuilder::new(&app, "signin", WebviewUrl::External(SIGN_IN_URL.parse().map_err(|e: url::ParseError| e.to_string())?))
         .title("Sign in to YouTube")
+        .additional_browser_args(crate::BROWSER_ARGS)
         .inner_size(560.0, 780.0)
         .center()
         .always_on_top(true)
@@ -222,7 +240,7 @@ pub async fn yt_channel_feeds(ids: Vec<String>) -> Result<Vec<String>, String> {
     let valid = |id: &String| {
         id.len() == 24 && id.starts_with("UC") && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     };
-    let http = reqwest::Client::new();
+    let http = http();
     let tasks: Vec<_> = ids
         .into_iter()
         .filter(valid)
@@ -248,4 +266,74 @@ pub async fn yt_channel_feeds(ids: Vec<String>) -> Result<Vec<String>, String> {
         }
     }
     Ok(out)
+}
+
+// ---- in-app YouTube view ---------------------------------------------------------
+// The ytmdesktop principle as a safety net: when Panorama's own UI can't show
+// something (a video whose creator blocks embedding, or a page that can't be
+// read), YouTube's own page is shown in a full-window view instead.
+
+/// Pages the view may open (paths on www.youtube.com).
+const VIEW_PATHS: &[&str] = &["/watch?v=", "/feed/", "/@", "/channel/", "/playlist?list=", "/results?search_query="];
+const CLOSE_HOST: &str = "panorama.invalid";
+
+fn view_allowed_host(host: &str) -> bool {
+    host == "youtube.com" || host.ends_with(".youtube.com") || host == "accounts.google.com" || host.ends_with(".google.com")
+}
+
+#[tauri::command]
+pub async fn yt_open_view(app: AppHandle, path: String) -> Result<(), String> {
+    let ok = path == "/"
+        || (path.len() < 400 && !path.contains("//") && VIEW_PATHS.iter().any(|p| path.starts_with(p)));
+    if !ok {
+        return Err("unsupported page".into());
+    }
+    let url: url::Url = format!("{ORIGIN}{path}").parse().map_err(|e: url::ParseError| e.to_string())?;
+    if let Some(w) = app.get_webview_window("ytview") {
+        w.navigate(url).map_err(|e| e.to_string())?;
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let fullscreen = app.get_webview_window("main").and_then(|m| m.is_fullscreen().ok()).unwrap_or(false);
+    let handle = app.clone();
+    let window = WebviewWindowBuilder::new(&app, "ytview", WebviewUrl::External(url))
+        .title("YouTube — Panorama")
+        .additional_browser_args(crate::BROWSER_ARGS)
+        .inner_size(1600.0, 900.0)
+        .maximized(true)
+        .fullscreen(fullscreen)
+        .focused(true)
+        .background_color(tauri::window::Color(0, 0, 0, 255))
+        .initialization_script(include_str!("ytview.js"))
+        .on_navigation(move |u| {
+            let host = u.host_str().unwrap_or("");
+            if host == CLOSE_HOST {
+                let h = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(w) = h.get_webview_window("ytview") {
+                        let _ = w.close();
+                    }
+                    if let Some(m) = h.get_webview_window("main") {
+                        let _ = m.set_focus();
+                    }
+                });
+                return false;
+            }
+            if view_allowed_host(host) {
+                return true;
+            }
+            if matches!(u.scheme(), "http" | "https") {
+                let _ = tauri_plugin_opener::open_url(u.as_str(), None::<&str>);
+            }
+            false
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    let handle = app.clone();
+    window.on_window_event(move |e| {
+        if let tauri::WindowEvent::Destroyed = e {
+            let _ = handle.emit_to("main", "ytview-closed", ());
+        }
+    });
+    Ok(())
 }

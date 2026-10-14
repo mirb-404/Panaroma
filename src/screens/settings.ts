@@ -38,7 +38,7 @@ const SOUND_LABEL: Record<Settings["uiSounds"], string> = { steam: "Steam Big Pi
 const STARTUP_MODES: Settings["startup"][] = ["default", "video", "off"];
 const STARTUP_LABEL: Record<Settings["startup"], string> = { default: "Panorama", video: "Your video", off: "Off" };
 
-type BoolKey = "startFullscreen" | "reducedMotion" | "autoplayNext" | "ultrawideFill";
+type BoolKey = "startFullscreen" | "reducedMotion" | "autoplayNext" | "ultrawideFill" | "hoverPreview";
 function toggle(key: BoolKey) {
   const on = !settings()[key];
   updateSettings({ [key]: on } as Partial<Settings>);
@@ -136,6 +136,12 @@ export function settingsScreen(): Screen {
         toggle("reducedMotion");
         applyScale();
       },
+    },
+    {
+      label: "Video previews",
+      value: () => onOff(settings().hoverPreview),
+      help: "Hover over a video, or rest the controller on it, and it plays muted in the thumbnail for a few seconds.",
+      select: () => toggle("hoverPreview"),
     },
     {
       label: "Autoplay next video",

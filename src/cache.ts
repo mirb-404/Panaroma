@@ -24,6 +24,23 @@ function db(): Promise<IDBDatabase | null> {
   return dbp;
 }
 
+/** The cached value and its age, however old. */
+export async function cacheEntry<T>(key: string): Promise<{ value: T; age: number } | undefined> {
+  let e = mem.get(key);
+  if (!e) {
+    const d = await db();
+    if (d) {
+      e = await new Promise<Entry | undefined>((resolve) => {
+        const req = d.transaction("r").objectStore("r").get(key);
+        req.onsuccess = () => resolve(req.result as Entry | undefined);
+        req.onerror = () => resolve(undefined);
+      });
+      if (e) mem.set(key, e);
+    }
+  }
+  return e ? { value: e.value as T, age: Date.now() - e.at } : undefined;
+}
+
 export async function cacheGet<T>(key: string, ttlMs: number): Promise<T | undefined> {
   let e = mem.get(key);
   if (!e) {

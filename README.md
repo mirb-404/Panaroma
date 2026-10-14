@@ -35,6 +35,50 @@ launches go straight to Home. **Settings → Account → Google account** signs 
   (the same approach as FreeTube and SmartTube). If YouTube changes it, parsing in
   `src/api.ts` may need updating.
 
+## Video previews (Netflix-style)
+
+Rest on a video (controller focus, or mouse hover, which also moves focus) and after
+~0.5 s it starts playing muted in the big hero area at the top right. Screens without a
+hero (search, channel and playlist grids) preview inside the card instead.
+
+- Nothing of YouTube's player UI is visible. The frame is taller than the hero box, so
+  the player's title bar sits in a letterbox band that is cropped away. The video is
+  revealed only after the play/pause icon YouTube shows for the first ~4 s has gone.
+- Pressing Ⓐ (or clicking) **hands the playing preview to the player**: the same iframe
+  moves into the player with `Element.moveBefore` (no reload) and is unmuted, so
+  playback simply continues. Without `moveBefore`, the player starts at the preview's
+  position instead.
+- Previews return to the image after 30 s. **Settings → Video previews** turns them off.
+
+## Speed
+
+- One pooled HTTP/2 connection with gzip/brotli (YouTube's JSON shrinks ~10×).
+- Stale-while-revalidate cache: cached data up to a day old shows instantly while a
+  fresh copy loads. Measured: Home's rows appear in ~0.3 s on a normal launch (~3 s with
+  an empty cache).
+- Home loads page by page, so the first row doesn't wait for the others.
+- At startup, connections to YouTube's hosts are opened and the player code is
+  downloaded once, so the first preview and the first video start faster.
+- The player's description and Up next are prefetched while focus rests on a video.
+
+## Staying working when YouTube changes
+
+The design follows ytmdesktop, which survives YouTube updates by leaning on YouTube's
+own UI wherever possible:
+
+- **Tolerant parsing.** Items are found anywhere in a response by renderer type. If
+  YouTube renames its renderers, a generic extractor still builds basic cards from any
+  object carrying a video ID and title, so rows degrade instead of going empty.
+- **Stable inputs.** The web client version is read from youtube.com at runtime.
+  Subscription uploads come from public RSS feeds. Thumbnails use fixed `i.ytimg.com`
+  URL patterns.
+- **YouTube's own page as the safety net.** Videos whose creators block embedding open
+  in Panorama's **in-app YouTube view**: youtube.com in a full-window, controller-ready
+  view (only the player is shown on watch pages; Ⓑ/Esc returns). Every "Couldn't load"
+  screen also offers **Open on YouTube**. The view's injected script only touches the
+  `<video>` element and container IDs, and YouTube pages have no access to Panorama's
+  commands (verified: the ACL denies them).
+
 ## Sounds & startup
 
 - **UI sounds** (Settings → Sound & startup): *Panorama* (the default) is a
@@ -53,9 +97,18 @@ launches go straight to Home. **Settings → Account → Google account** signs 
 
 `pnpm tauri build` produces a standard MSI: **Welcome → choose install folder →
 Install → Finish** (with an optional "Launch Panorama" box). No license page and no
-extras.
+extras. The installer artwork (`src-tauri/installer/*.bmp`) is rendered from
+`tools/installer-art/art.html` with `node tools/installer-art/render.mjs`. Bump
+`version` in `src-tauri/tauri.conf.json` for each release so the MSI upgrades in place.
 
 ## Controls
+
+Any controller with a standard layout works: Xbox, PlayStation (DualShock 4 /
+DualSense, ✕ ○ □ △ = A B X Y), Switch Pro and most others. Input comes from the
+web Gamepad API, with native XInput/Windows.Gaming.Input (Rust) as a backup that is
+only used while the web API sees no controller. If Steam is running with Steam Input
+enabled for your controller, Steam may capture it; disable Steam Input for desktop use
+if Panorama doesn't respond.
 
 | Xbox controller | Keyboard | Browse | Player |
 |---|---|---|---|

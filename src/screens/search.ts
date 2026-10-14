@@ -51,6 +51,7 @@ export function searchScreen(): Screen {
     results = new BrowseView({
       rows: [{ title: `Results for “${q}”`, layout: "grid", load: () => api.search(q) }],
       empty: errorPanel,
+      youtubePath: `/results?search_query=${encodeURIComponent(q)}`,
     });
     host.replaceChildren(results.el);
     results.onShow();

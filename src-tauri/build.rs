@@ -13,6 +13,7 @@ fn main() {
             "yt_close_sign_in",
             "yt_sign_out",
             "yt_channel_feeds",
+            "yt_open_view",
             "steam_sounds_available",
             "read_steam_sound",
             "import_startup_video",

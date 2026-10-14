@@ -12,19 +12,18 @@ const signInRows = (): RowSpec[] => [{ title: "", load: signedOut }];
 
 export function homeScreen() {
   if (!signedIn()) return new BrowseView({ hero: true, rows: signInRows(), empty: errorPanel });
-  const feed = api.homeFeed();
-  const slice = (from: number, to: number) => async () => (await feed).loose.slice(from, to);
   return new BrowseView({
     hero: true,
     rows: [
-      { title: "Recommended for you", load: slice(0, 16) },
+      { title: "Recommended for you", load: () => api.homeFeedPage(0) },
       { title: "Latest from your subscriptions", load: api.subscriptionFeed },
       { title: "Continue watching", load: api.history },
-      { title: "Picked for you", load: slice(16, 32) },
+      { title: "Picked for you", load: () => api.homeFeedPage(1) },
       { title: "Watch later", load: api.watchLater },
-      { title: "More to explore", load: slice(32, 64) },
+      { title: "More to explore", load: () => api.homeFeedPage(2) },
     ],
     empty: errorPanel,
+    youtubePath: "/",
   });
 }
 
@@ -37,6 +36,7 @@ export function subscriptionsScreen() {
       { title: "Your channels", load: api.subscribedChannels },
     ],
     empty: errorPanel,
+    youtubePath: "/feed/subscriptions",
   });
 }
 
@@ -51,5 +51,6 @@ export function libraryScreen() {
       { title: "Your playlists", load: api.myPlaylists },
     ],
     empty: errorPanel,
+    youtubePath: "/feed/you",
   });
 }
