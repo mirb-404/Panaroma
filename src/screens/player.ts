@@ -3,7 +3,7 @@
 // screens the 16:9 video leaves pillarbox space, which hosts the info / up-next
 // panel instead. Controller input drives the player through its public JS API.
 import * as api from "../api";
-import { decodeEntities, fmtAge, fmtCount, fmtDuration, h } from "../dom";
+import { decodeEntities, fmtDuration, h } from "../dom";
 import type { ActionEvent } from "../input";
 import { flip } from "../motion";
 import { openExternal } from "../platform";
@@ -62,7 +62,28 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
   let resumeOnShow = false;
 
   const ultra = () => window.innerWidth / window.innerHeight >= 2.0;
-  let layout: Layout = ultra() ? "split" : "theater";
+  // With "Fill ultrawide screens" on, ultrawide opens zoomed full-width; Ⓨ
+  // switches to the side-panel layout.
+  let layout: Layout = ultra() && !settings().ultrawideFill ? "split" : "theater";
+
+  // Ultrawide fill: in theater layout the 16:9 player is zoomed (≤1.4×) to fill
+  // the width, cropping top and bottom. It zooms out while paused and right
+  // after a click into the player, so YouTube's controls stay reachable.
+  const MAX_ZOOM = 1.4;
+  let unzoomed = true; // until playback starts
+  let rezoomTimer = 0;
+  function fillZoom(W: number, H: number): number {
+    if (layout !== "theater" || !settings().ultrawideFill || unzoomed) return 1;
+    return Math.min(MAX_ZOOM, Math.max(1, W / ((H * 16) / 9)));
+  }
+  function setUnzoomed(on: boolean) {
+    clearTimeout(rezoomTimer);
+    if (unzoomed === on) return;
+    const from = videoBox.getBoundingClientRect();
+    unzoomed = on;
+    sizeVideo();
+    if (from.width) flip(videoBox, from, 520);
+  }
 
   // ---- DOM --------------------------------------------------------------------
   const host = h("div");
@@ -110,6 +131,9 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
       hgt = H;
       w = (H * 16) / 9;
     }
+    const z = fillZoom(W, H);
+    w *= z;
+    hgt *= z;
     videoBox.style.width = `${Math.round(w)}px`;
     videoBox.style.height = `${Math.round(hgt)}px`;
     // Split: video hugs the left; panel takes the rest. Theater: centered.
@@ -134,14 +158,30 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
   function renderInfo() {
     titleEl.textContent = decodeEntities(current.title);
     channelBtn.textContent = current.channelTitle;
-    lineEl.textContent = [fmtCount(current.views, "view"), fmtAge(current.publishedAt), fmtCount(current.likes, "like")]
-      .filter(Boolean)
-      .join("  ·  ");
+    lineEl.textContent = [current.viewsText, current.ageText].filter(Boolean).join("  ·  ");
     descEl.textContent = current.description;
     descEl.scrollTop = 0;
     ambient.style.backgroundImage = `url("${current.thumb}")`;
     setBackdrop(null);
     renderQueue();
+    loadDetails(current);
+  }
+
+  /** Full description, and related videos to fill Up next when it's short. */
+  function loadDetails(v: api.Video) {
+    api
+      .watchNext(v.id)
+      .then(({ description, related }) => {
+        if (destroyed || current.id !== v.id) return;
+        if (description) descEl.textContent = description;
+        const known = new Set(queue.map((q) => q.id));
+        const fresh = related.filter((r) => !known.has(r.id));
+        if (pos >= queue.length - 3 && fresh.length) {
+          queue = [...queue, ...fresh.slice(0, 20)];
+          renderQueue();
+        }
+      })
+      .catch(() => {});
   }
 
   function renderQueue() {
@@ -225,6 +265,8 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
           onStateChange: (e: any) => {
             state = e.data;
             el.classList.toggle("playing", state === State.Playing);
+            if (state === State.Playing) rezoomTimer = window.setTimeout(() => setUnzoomed(false), 600);
+            else if (state !== State.Buffering) setUnzoomed(true);
             if (state === State.Ended) onEnded();
             tickProgress();
           },
@@ -299,7 +341,14 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
 
   // Clicking the player moves keyboard focus into its cross-origin iframe, where
   // our key handlers can't see it. Hand focus back to the app right after.
-  const onBlur = () => setTimeout(refocusApp, 0);
+  const onBlur = () => {
+    // A click went into the player: show it whole for a moment.
+    if (document.activeElement?.tagName === "IFRAME" && settings().ultrawideFill) {
+      setUnzoomed(true);
+      rezoomTimer = window.setTimeout(() => state === State.Playing && setUnzoomed(false), 5000);
+    }
+    setTimeout(refocusApp, 0);
+  };
   function refocusApp() {
     if (document.activeElement?.tagName === "IFRAME") (document.activeElement as HTMLElement).blur();
     window.focus();

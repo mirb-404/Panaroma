@@ -1,15 +1,14 @@
-import { onAuth, oauthConfigured, signedIn, signOut } from "../auth";
+import { canSignIn, onAuth, signedIn, signOut } from "../auth";
 import { cacheClear } from "../cache";
 import { h, icon } from "../dom";
 import type { ActionEvent } from "../input";
 import { invoke, isTauri, openExternal, pickVideoFile, quitApp, setFullscreen } from "../platform";
 import { edgeBump, router, TABS, type Screen } from "../router";
-import { onSettings, quotaDay, settings, updateSettings, type Settings } from "../settings";
+import { onSettings, settings, updateSettings, type Settings } from "../settings";
 import { cue, loadSounds, setSoundVolume } from "../sound";
 import { playStartup } from "../ui/intro";
 import { applyScale, setBackdrop, toast } from "../ui/chrome";
-import { CREATE_CLIENT_URL, openOAuthSetup, YT_API_URL } from "../ui/oauthsetup";
-import { confirmDialog, openTextEntry } from "../ui/textentry";
+import { confirmDialog } from "../ui/textentry";
 import { signInFlow } from "./common";
 
 interface Row {
@@ -27,7 +26,6 @@ interface Row {
 const REGIONS = ["US", "GB", "CA", "AU", "IN", "DE", "FR", "ES", "IT", "NL", "SE", "JP", "KR", "BR", "MX", "IE", "NZ", "ZA", "SG", "PH"];
 const SCALES = [0.8, 0.9, 1, 1.1, 1.2, 1.35];
 
-const mask = (s: string) => (!s ? "Not set" : s.length <= 10 ? "••••••" : `${s.slice(0, 6)}…${s.slice(-4)}`);
 const onOff = (b: boolean) => (b ? "On" : "Off");
 
 function cycle<T>(list: T[], cur: T, dir: number): T {
@@ -35,12 +33,12 @@ function cycle<T>(list: T[], cur: T, dir: number): T {
   return list[(i + dir + list.length) % list.length] ?? list[0];
 }
 
-const SOUND_PACKS: Settings["uiSounds"][] = ["steam", "panorama", "off"];
+const SOUND_PACKS: Settings["uiSounds"][] = ["panorama", "steam", "off"];
 const SOUND_LABEL: Record<Settings["uiSounds"], string> = { steam: "Steam Big Picture", panorama: "Panorama", off: "Off" };
 const STARTUP_MODES: Settings["startup"][] = ["default", "video", "off"];
 const STARTUP_LABEL: Record<Settings["startup"], string> = { default: "Panorama", video: "Your video", off: "Off" };
 
-type BoolKey = "startFullscreen" | "reducedMotion" | "autoplayNext";
+type BoolKey = "startFullscreen" | "reducedMotion" | "autoplayNext" | "ultrawideFill";
 function toggle(key: BoolKey) {
   const on = !settings()[key];
   updateSettings({ [key]: on } as Partial<Settings>);
@@ -78,54 +76,21 @@ export function settingsScreen(): Screen {
   const rows: Row[] = [
     {
       section: "Account",
-      label: "Sign-in setup",
-      value: () => (oauthConfigured() ? "Ready" : "Not set up — select to start"),
-      help: "Panorama doesn't ship with Google credentials — you create your own free OAuth client in about 3 minutes: enable the YouTube Data API v3, then Credentials → Create credentials → OAuth client ID → Desktop app → Create, and paste the Client ID and Client secret here. Select this row for a step-by-step guide.",
-      links: [
-        { label: "Open YouTube Data API v3 page", url: YT_API_URL },
-        { label: "Create OAuth client", url: CREATE_CLIENT_URL },
-      ],
-      select: () => openOAuthSetup(),
-    },
-    {
-      label: "OAuth Client ID",
-      value: () => (settings().clientId ? mask(settings().clientId) : "Not set"),
-      help: "From Google Cloud Console → Credentials → your Desktop app OAuth client. It ends with .apps.googleusercontent.com. Paste it here (Ctrl+V or the Paste key).",
-      links: [{ label: "Create OAuth client", url: CREATE_CLIENT_URL }],
-      select: () =>
-        openTextEntry({
-          title: "OAuth Client ID",
-          hint: "Paste your Client ID (ends with .apps.googleusercontent.com)",
-          value: settings().clientId,
-          onSubmit: (v) => updateSettings({ clientId: v.replace(/\s+/g, "") }),
-        }),
-    },
-    {
-      label: "OAuth Client secret",
-      value: () => mask(settings().clientSecret),
-      help: "Shown next to the Client ID in Google Cloud Console (usually starts with GOCSPX-). Desktop-app secrets aren't treated as confidential by Google; sign-in also uses PKCE, and your sign-in is stored in Windows Credential Manager.",
-      links: [{ label: "Create OAuth client", url: CREATE_CLIENT_URL }],
-      select: () =>
-        openTextEntry({
-          title: "OAuth Client secret",
-          hint: "Paste your Client secret (usually starts with GOCSPX-)",
-          value: settings().clientSecret,
-          secret: true,
-          onSubmit: (v) => updateSettings({ clientSecret: v.replace(/\s+/g, "") }),
-        }),
-    },
-    {
       label: "Google account",
-      value: () => (signedIn() ? "Signed in — select to sign out" : oauthConfigured() ? "Select to sign in" : isTauri ? "Finish sign-in setup first" : "Desktop app only"),
-      help: "Signing in opens your browser for Google's consent screen; Panorama only requests read-only access to your YouTube account.",
+      value: () =>
+        signedIn()
+          ? `${settings().accountName || "Signed in"} — select to sign out`
+          : canSignIn()
+            ? "Not signed in — select to sign in"
+            : "Desktop app only",
+      help: "Panorama signs in to YouTube on Google's own sign-in page, just like a browser. Your recommendations, subscriptions, history, Watch Later and playlists come from your account. Signing out removes the session from this PC.",
       select: () => {
         if (signedIn())
-          confirmDialog("Sign out?", "Your subscriptions and library will be hidden until you sign in again.", "Sign out", async () => {
+          confirmDialog("Sign out?", "Panorama will forget your YouTube session on this PC.", "Sign out", async () => {
             await signOut().catch(() => {});
             toast("Signed out");
           });
-        else if (oauthConfigured()) signInFlow();
-        else openOAuthSetup();
+        else if (canSignIn()) signInFlow();
       },
     },
     {
@@ -147,6 +112,12 @@ export function settingsScreen(): Screen {
         updateSettings({ uiScale: SCALES[i] ?? 1 });
         applyScale();
       },
+    },
+    {
+      label: "Fill ultrawide screens",
+      value: () => onOff(settings().ultrawideFill),
+      help: "On ultrawide monitors, zooms videos in (up to 1.4×) to fill the width, trimming a little from the top and bottom. It zooms back out while paused or right after you click the player, so YouTube's own controls stay reachable. Press Ⓨ in the player for the side-panel layout instead.",
+      select: () => toggle("ultrawideFill"),
     },
     {
       label: "Start in fullscreen",
@@ -176,7 +147,7 @@ export function settingsScreen(): Screen {
       section: "Sound & startup",
       label: "UI sounds",
       value: () => SOUND_LABEL[settings().uiSounds],
-      help: "Steam Big Picture uses the sounds from your own Steam installation (nothing is bundled with Panorama); if Steam isn't installed, Panorama's built-in sounds play instead. Use ◀ ▶ to change.",
+      help: "Panorama plays its own built-in sounds. Steam Big Picture uses the sounds from your own Steam installation (nothing is bundled with Panorama) and falls back to Panorama's if Steam isn't installed. Use ◀ ▶ to change.",
       adjust: (d) => setSounds(cycle(SOUND_PACKS, settings().uiSounds, d)),
     },
     {
@@ -211,11 +182,6 @@ export function settingsScreen(): Screen {
     },
     {
       section: "Data",
-      label: "API quota used today",
-      value: () => `${settings().quota.day === quotaDay() ? settings().quota.units : 0} / 10,000 units`,
-      help: "Estimated from this device. Browsing costs 1 unit per request; each search costs 100. The quota resets at midnight Pacific time.",
-    },
-    {
       label: "Clear cache",
       help: "Forget cached YouTube responses and fetch everything fresh.",
       select: async () => {

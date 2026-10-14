@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-yt-close-sign-in"
+description = "Enables the yt_close_sign_in command without any pre-configured scope."
+commands.allow = ["yt_close_sign_in"]
+
+[[permission]]
+identifier = "deny-yt-close-sign-in"
+description = "Denies the yt_close_sign_in command without any pre-configured scope."
+commands.deny = ["yt_close_sign_in"]

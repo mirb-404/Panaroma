@@ -3,7 +3,7 @@
 // each shelf remembers its position, and all scrolling is spring-driven
 // transforms (no layout per frame).
 import { ApiError, type Item, type Video } from "../api";
-import { decodeEntities, fmtAge, fmtCount, fmtDuration, h } from "../dom";
+import { decodeEntities, h } from "../dom";
 import type { ActionEvent } from "../input";
 import { Spring } from "../motion";
 import { edgeBump, type Screen } from "../router";
@@ -293,13 +293,13 @@ export class BrowseView implements Screen {
     let line: string[];
     let desc = "";
     if (item.kind === "video") {
-      line = [item.channelTitle, fmtCount(item.views, "view"), fmtAge(item.publishedAt), item.live ? "LIVE" : fmtDuration(item.durationSec)];
+      line = [item.channelTitle, item.viewsText, item.ageText, item.live ? "LIVE" : item.durationText];
       desc = item.description;
     } else if (item.kind === "channel") {
-      line = [fmtCount(item.subscribers, "subscriber")];
+      line = [item.subscribersText, item.videosText];
       desc = item.description;
     } else {
-      line = [item.channelTitle, item.count !== undefined ? `${item.count} videos` : ""];
+      line = [item.channelTitle, item.countText];
     }
     const next = h(
       "div.hero-inner",

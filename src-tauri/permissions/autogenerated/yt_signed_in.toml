@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-yt-signed-in"
+description = "Enables the yt_signed_in command without any pre-configured scope."
+commands.allow = ["yt_signed_in"]
+
+[[permission]]
+identifier = "deny-yt-signed-in"
+description = "Denies the yt_signed_in command without any pre-configured scope."
+commands.deny = ["yt_signed_in"]

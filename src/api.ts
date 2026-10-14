@@ -1,10 +1,13 @@
-// YouTube Data API v3 client: normalizes responses into the few shapes the UI
-// renders, caches aggressively, and meters quota (10,000 units/day per key).
-import { accessToken } from "./auth";
+// YouTube data through the signed-in youtube.com session (the same web client
+// API youtube.com uses), normalized into the few shapes the UI renders.
+//
+// Responses are deep, renderer-based JSON whose layout shifts over time, so
+// parsing walks the whole tree and recognizes item renderers wherever they are
+// instead of depending on exact paths.
 import { cacheGet, cachePut } from "./cache";
-import { addQuota, settings } from "./settings";
+import { invoke } from "./platform";
+import { settings } from "./settings";
 
-const BASE = "https://www.googleapis.com/youtube/v3/";
 const MIN = 60_000;
 
 export interface Video {
@@ -13,11 +16,12 @@ export interface Video {
   title: string;
   channelId: string;
   channelTitle: string;
-  publishedAt: string;
   description: string;
   durationSec: number;
-  views?: number;
-  likes?: number;
+  /** Display strings exactly as YouTube shows them. */
+  durationText: string;
+  viewsText: string;
+  ageText: string;
   live: boolean;
   thumb: string;
   thumbLarge: string;
@@ -30,9 +34,8 @@ export interface Channel {
   description: string;
   avatar: string;
   banner?: string;
-  subscribers?: number;
-  videoCount?: number;
-  uploads?: string;
+  subscribersText: string;
+  videosText: string;
 }
 
 export interface Playlist {
@@ -40,12 +43,17 @@ export interface Playlist {
   id: string;
   title: string;
   channelTitle: string;
-  count?: number;
+  countText: string;
   thumb: string;
   thumbLarge: string;
 }
 
 export type Item = Video | Channel | Playlist;
+
+export interface Account {
+  name: string;
+  avatar: string;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -57,268 +65,419 @@ export class ApiError extends Error {
   }
 }
 
-type Params = Record<string, string | number | boolean | undefined>;
+type Json = any;
+const isDemo = () => import.meta.env.DEV && new URLSearchParams(location.search).has("demo");
 
-async function call<T>(path: string, params: Params, opts: { units: number; ttl: number; auth?: boolean }): Promise<T> {
-  const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") qs.set(k, String(v));
-  const key = `${opts.auth ? "me:" : ""}${path}?${qs}`;
-  if (import.meta.env.DEV && new URLSearchParams(location.search).has("demo")) {
-    if (opts.auth) throw new ApiError("Sign in to see this", 401, "signedOut");
+async function yt(endpoint: string, body: Record<string, unknown>, ttl: number): Promise<Json> {
+  const key = `yt:${endpoint}:${JSON.stringify(body)}:${settings().region}`;
+  if (isDemo()) {
     const { demoResponse } = await import("./demo");
-    await new Promise((r) => setTimeout(r, 150 + Math.random() * 400));
-    return demoResponse(path, qs) as T;
+    await new Promise((r) => setTimeout(r, 150 + Math.random() * 350));
+    return demoResponse(endpoint, body);
   }
-  const hit = await cacheGet<T>(key, opts.ttl);
+  const hit = await cacheGet<Json>(key, ttl);
   if (hit) return hit;
-
-  // Every request — public or personal — is authorized by the signed-in user's
-  // Google token; there is no API key.
-  const token = await accessToken();
-  if (!token) throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-
-  let res: Response;
+  let res: Json;
   try {
-    res = await fetch(`${BASE}${path}?${qs}`, { headers });
-  } catch {
-    throw new ApiError("You're offline", 0, "offline");
+    res = await invoke<Json>("yt_api", { endpoint, body, hl: navigator.language || "en", gl: settings().region });
+  } catch (e) {
+    const msg = String(e);
+    if (msg === "signedOut") throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
+    if (msg === "offline") throw new ApiError("You're offline", 0, "offline");
+    throw new ApiError(msg, 500);
   }
-  addQuota(opts.units);
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const reason = body?.error?.errors?.[0]?.reason ?? "";
-    const msg =
-      reason === "quotaExceeded"
-        ? "Daily YouTube API quota reached — it resets at midnight Pacific"
-        : (body?.error?.message ?? `YouTube API error ${res.status}`);
-    throw new ApiError(msg, res.status, reason);
+  cachePut(key, res);
+  return res;
+}
+
+// ---- tree helpers ---------------------------------------------------------------
+
+/** Text from any of YouTube's text shapes: simpleText, runs, content. */
+const tx = (x: Json): string =>
+  !x ? "" : typeof x === "string" ? x : (x.simpleText ?? x.content ?? (Array.isArray(x.runs) ? x.runs.map((r: Json) => r.text).join("") : ""));
+
+/** First value in the tree for which `pick` returns something. */
+function find<T>(node: Json, pick: (n: Json) => T | undefined, depth = 0): T | undefined {
+  if (!node || typeof node !== "object" || depth > 40) return undefined;
+  const hit = pick(node);
+  if (hit !== undefined) return hit;
+  for (const v of Array.isArray(node) ? node : Object.values(node)) {
+    const r = find(v, pick, depth + 1);
+    if (r !== undefined) return r;
   }
-  cachePut(key, body);
-  return body as T;
+  return undefined;
 }
 
-// ---- normalization -------------------------------------------------------
+const https = (u: string) => (u?.startsWith("//") ? `https:${u}` : u ?? "");
+const largest = (list: Json[] | undefined): string =>
+  https([...(list ?? [])].sort((a, b) => (b?.width ?? 0) - (a?.width ?? 0))[0]?.url ?? "");
 
-function thumbs(t: any): { thumb: string; thumbLarge: string } {
-  t ??= {};
-  const pick = (...k: string[]) => k.map((n) => t[n]?.url).find(Boolean) ?? "";
-  return {
-    thumb: pick("medium", "high", "standard", "default"),
-    thumbLarge: pick("maxres", "standard", "high", "medium", "default"),
-  };
+function durationToSec(text: string): number {
+  if (!/^\d+(:\d+)+$/.test(text)) return 0;
+  return text.split(":").reduce((s, p) => s * 60 + +p, 0);
 }
 
-export function parseDuration(iso: string | undefined): number {
-  const m = /^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso ?? "");
-  if (!m) return 0;
-  return (+(m[1] ?? 0)) * 86400 + (+(m[2] ?? 0)) * 3600 + (+(m[3] ?? 0)) * 60 + +(m[4] ?? 0);
-}
+const channelIdIn = (n: Json): string =>
+  find(n, (x) => (typeof x?.browseId === "string" && x.browseId.startsWith("UC") ? x.browseId : undefined)) ?? "";
 
-function toVideo(v: any): Video {
-  const s = v.snippet ?? {};
+function video(v: Partial<Video> & { id: string }): Video {
+  const durationText = v.durationText ?? "";
   return {
     kind: "video",
-    id: v.id,
-    title: s.title ?? "",
-    channelId: s.channelId ?? "",
-    channelTitle: s.channelTitle ?? "",
-    publishedAt: s.publishedAt ?? "",
-    description: s.description ?? "",
-    durationSec: parseDuration(v.contentDetails?.duration),
-    views: v.statistics?.viewCount ? +v.statistics.viewCount : undefined,
-    likes: v.statistics?.likeCount ? +v.statistics.likeCount : undefined,
-    live: s.liveBroadcastContent === "live",
-    ...thumbs(s.thumbnails),
+    title: "",
+    channelId: "",
+    channelTitle: "",
+    description: "",
+    viewsText: "",
+    ageText: "",
+    live: false,
+    ...v,
+    durationText,
+    durationSec: durationToSec(durationText),
+    thumb: v.thumb || `https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`,
+    thumbLarge: `https://i.ytimg.com/vi/${v.id}/maxresdefault.jpg`,
   };
 }
 
-function toChannel(c: any): Channel {
-  const s = c.snippet ?? {};
-  const banner = c.brandingSettings?.image?.bannerExternalUrl;
+// ---- renderer parsers --------------------------------------------------------------
+
+function fromVideoRenderer(r: Json): Video | null {
+  if (!r?.videoId) return null;
+  const owner = r.ownerText ?? r.longBylineText ?? r.shortBylineText;
+  const overlayTime = find(r.thumbnailOverlays, (x) => x?.thumbnailOverlayTimeStatusRenderer?.text);
+  const durationText = tx(r.lengthText) || tx(overlayTime);
+  const live =
+    JSON.stringify(r.badges ?? []).includes("LIVE") ||
+    JSON.stringify(r.thumbnailOverlays ?? []).includes('"LIVE"') ||
+    durationText.toUpperCase() === "LIVE";
+  const info = tx(r.videoInfo); // playlist rows: "1.2M views • 3 days ago"
+  const [infoViews, infoAge] = info.split(" • ");
+  return video({
+    id: r.videoId,
+    title: tx(r.title),
+    channelId: channelIdIn(owner) || channelIdIn(r.channelThumbnailSupportedRenderers),
+    channelTitle: tx(owner),
+    durationText: live ? "" : durationText,
+    viewsText: tx(r.shortViewCountText) || tx(r.viewCountText) || infoViews || "",
+    ageText: tx(r.publishedTimeText) || infoAge || "",
+    description: tx(r.descriptionSnippet) || tx(r.detailedMetadataSnippets?.[0]?.snippetText),
+    live,
+    thumb: largest(r.thumbnail?.thumbnails),
+  });
+}
+
+function badgesOf(img: Json): string[] {
+  const out: string[] = [];
+  find(img?.overlays, (x) => {
+    if (x?.thumbnailBadgeViewModel?.text) out.push(x.thumbnailBadgeViewModel.text);
+    return undefined;
+  });
+  return out;
+}
+
+function fromLockup(l: Json): Item | null {
+  const meta = l?.metadata?.lockupMetadataViewModel;
+  if (!l?.contentId || !meta) return null;
+  const rows: string[][] = (meta.metadata?.contentMetadataViewModel?.metadataRows ?? []).map((row: Json) =>
+    (row.metadataParts ?? []).map((p: Json) => tx(p.text)).filter(Boolean),
+  );
+  const img = l.contentImage?.thumbnailViewModel ?? l.contentImage?.collectionThumbnailViewModel?.primaryThumbnail?.thumbnailViewModel;
+  const thumb = largest(img?.image?.sources);
+  const badges = badgesOf(img);
+  const title = tx(meta.title);
+  const type: string = l.contentType ?? "";
+  if (type.includes("PLAYLIST") || type.includes("PODCAST") || /^(PL|RD|OL|UU)/.test(l.contentId)) {
+    return {
+      kind: "playlist",
+      id: l.contentId,
+      title,
+      channelTitle: rows[0]?.[0] ?? "",
+      countText: badges.find((b) => /\d/.test(b)) ?? badges[0] ?? "",
+      thumb,
+      thumbLarge: thumb,
+    };
+  }
+  if (!type.includes("VIDEO") && type) return null;
+  const durationText = badges.find((b) => /^\d+(:\d+)+$/.test(b)) ?? "";
+  const live = badges.some((b) => /^live$/i.test(b));
+  const flat = rows.flat();
+  return video({
+    id: l.contentId,
+    title,
+    channelId: channelIdIn(meta) || channelIdIn(l.metadata),
+    channelTitle: rows[0]?.[0] ?? "",
+    durationText,
+    viewsText: flat.find((t) => /view|watching/i.test(t)) ?? "",
+    ageText: flat.find((t) => /ago|streamed|premiered/i.test(t)) ?? "",
+    live,
+    thumb,
+  });
+}
+
+function fromChannel(r: Json): Channel | null {
+  if (!r?.channelId) return null;
+  const texts = [tx(r.subscriberCountText), tx(r.videoCountText)];
   return {
     kind: "channel",
-    id: typeof c.id === "string" ? c.id : (s.resourceId?.channelId ?? ""),
-    title: s.title ?? "",
-    description: s.description ?? "",
-    avatar: s.thumbnails?.high?.url ?? s.thumbnails?.medium?.url ?? s.thumbnails?.default?.url ?? "",
-    banner: banner ? `${banner}=w2560` : undefined,
-    subscribers: c.statistics?.hiddenSubscriberCount ? undefined : num(c.statistics?.subscriberCount),
-    videoCount: num(c.statistics?.videoCount),
-    uploads: c.contentDetails?.relatedPlaylists?.uploads,
+    id: r.channelId,
+    title: tx(r.title),
+    description: tx(r.descriptionSnippet),
+    avatar: largest(r.thumbnail?.thumbnails),
+    subscribersText: texts.find((t) => /subscriber/i.test(t)) ?? "",
+    videosText: texts.find((t) => /video/i.test(t)) ?? "",
   };
 }
 
-function toPlaylist(p: any): Playlist {
-  const s = p.snippet ?? {};
-  return {
-    kind: "playlist",
-    id: p.id,
-    title: s.title ?? "",
-    channelTitle: s.channelTitle ?? "",
-    count: num(p.contentDetails?.itemCount),
-    ...thumbs(s.thumbnails),
-  };
+function fromPlaylist(r: Json): Playlist | null {
+  if (!r?.playlistId) return null;
+  const thumb = largest(r.thumbnails?.[0]?.thumbnails ?? r.thumbnail?.thumbnails ?? r.thumbnailRenderer?.playlistVideoThumbnailRenderer?.thumbnail?.thumbnails);
+  const count = r.videoCount ? `${r.videoCount} videos` : tx(r.videoCountShortText) || tx(r.videoCountText);
+  return { kind: "playlist", id: r.playlistId, title: tx(r.title), channelTitle: tx(r.shortBylineText ?? r.longBylineText), countText: count, thumb, thumbLarge: thumb };
 }
 
-const num = (s: string | undefined) => (s ? +s : undefined);
+const PARSERS: Record<string, (r: Json) => Item | null> = {
+  videoRenderer: fromVideoRenderer,
+  gridVideoRenderer: fromVideoRenderer,
+  compactVideoRenderer: fromVideoRenderer,
+  playlistVideoRenderer: fromVideoRenderer,
+  playlistPanelVideoRenderer: fromVideoRenderer,
+  lockupViewModel: fromLockup,
+  channelRenderer: fromChannel,
+  gridChannelRenderer: fromChannel,
+  playlistRenderer: fromPlaylist,
+  gridPlaylistRenderer: fromPlaylist,
+};
 
-/** Hydrates ids into full videos (durations, stats). 1 unit per 50 ids. */
-export async function videosById(ids: string[]): Promise<Video[]> {
-  const out: Video[] = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    const chunk = ids.slice(i, i + 50);
-    const r = await call<any>(
-      "videos",
-      { part: "snippet,contentDetails,statistics", id: chunk.join(","), maxResults: 50 },
-      { units: 1, ttl: 60 * MIN },
-    );
-    const byId = new Map<string, Video>((r.items ?? []).map((v: any) => [v.id, toVideo(v)]));
-    for (const id of chunk) {
-      const v = byId.get(id);
-      if (v) out.push(v);
-    }
+/** Never descend into these (ads, Shorts shelves, menus). */
+const SKIP = new Set([
+  "adSlotRenderer", "reelShelfRenderer", "reelItemRenderer", "shortsLockupViewModel",
+  "menu", "menuRenderer", "header", "topbar", "sidebar", "frameworkUpdates", "responseContext",
+]);
+
+function collect(node: Json, out: Item[] = [], depth = 0): Item[] {
+  if (!node || typeof node !== "object" || depth > 60) return out;
+  if (Array.isArray(node)) {
+    for (const n of node) collect(n, out, depth + 1);
+    return out;
+  }
+  for (const [k, v] of Object.entries(node)) {
+    if (SKIP.has(k)) continue;
+    const parse = PARSERS[k];
+    if (parse) {
+      const item = parse(v);
+      if (item) out.push(item);
+    } else collect(v, out, depth + 1);
   }
   return out;
 }
 
-// ---- public queries --------------------------------------------------------
-
-export async function trending(categoryId?: string): Promise<Video[]> {
-  const r = await call<any>(
-    "videos",
-    {
-      part: "snippet,contentDetails,statistics",
-      chart: "mostPopular",
-      regionCode: settings().region,
-      videoCategoryId: categoryId,
-      maxResults: 50,
-    },
-    { units: 1, ttl: 30 * MIN },
-  );
-  return (r.items ?? []).map(toVideo);
+interface Shelf {
+  title: string;
+  items: Item[];
 }
 
-export async function search(q: string): Promise<Video[]> {
-  const r = await call<any>(
-    "search",
-    { part: "snippet", q, type: "video", maxResults: 50, regionCode: settings().region, safeSearch: "moderate" },
-    { units: 100, ttl: 6 * 60 * MIN },
-  );
-  return videosById((r.items ?? []).map((i: any) => i.id?.videoId).filter(Boolean));
+/** Items outside shelves, plus titled shelves (for Home's rows). */
+function collectWithShelves(node: Json): { loose: Item[]; shelves: Shelf[] } {
+  const loose: Item[] = [];
+  const shelves: Shelf[] = [];
+  const walk = (n: Json, depth: number) => {
+    if (!n || typeof n !== "object" || depth > 60) return;
+    if (Array.isArray(n)) return n.forEach((x) => walk(x, depth + 1));
+    for (const [k, v] of Object.entries(n)) {
+      if (SKIP.has(k)) continue;
+      if (k === "richShelfRenderer" || k === "shelfRenderer") {
+        const items = collect((v as Json).contents ?? (v as Json).content);
+        const title = tx((v as Json).title);
+        if (items.length && title) shelves.push({ title, items });
+        continue;
+      }
+      const parse = PARSERS[k];
+      if (parse) {
+        const item = parse(v);
+        if (item) loose.push(item);
+      } else walk(v, depth + 1);
+    }
+  };
+  walk(node, 0);
+  return { loose, shelves };
 }
 
-export async function channel(id: string): Promise<Channel> {
-  const r = await call<any>(
-    "channels",
-    { part: "snippet,statistics,contentDetails,brandingSettings", id },
-    { units: 1, ttl: 6 * 60 * MIN },
-  );
-  if (!r.items?.length) throw new ApiError("Channel not found", 404);
-  return toChannel(r.items[0]);
+const continuationOf = (r: Json): string | undefined =>
+  find(r, (x) => x?.continuationItemRenderer && (find(x.continuationItemRenderer, (y) => y?.continuationCommand?.token) as string | undefined)) ??
+  find(r, (x) => x?.nextContinuationData?.continuation);
+
+function dedupe<T extends Item>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((i) => !seen.has(i.kind + i.id) && seen.add(i.kind + i.id));
 }
 
-export async function playlistVideos(playlistId: string, auth = false, max = 50): Promise<Video[]> {
-  const r = await call<any>(
-    "playlistItems",
-    { part: "contentDetails", playlistId, maxResults: Math.min(max, 50) },
-    { units: 1, ttl: 20 * MIN, auth },
-  );
-  return videosById((r.items ?? []).map((i: any) => i.contentDetails?.videoId).filter(Boolean));
-}
-
-export async function channelPlaylists(channelId: string): Promise<Playlist[]> {
-  const r = await call<any>(
-    "playlists",
-    { part: "snippet,contentDetails", channelId, maxResults: 25 },
-    { units: 1, ttl: 6 * 60 * MIN },
-  );
-  return (r.items ?? []).map(toPlaylist).filter((p: Playlist) => (p.count ?? 1) > 0);
-}
-
-// ---- signed-in queries ------------------------------------------------------
-
-export async function mySubscriptions(): Promise<Channel[]> {
-  const out: Channel[] = [];
-  let pageToken: string | undefined;
-  do {
-    const r = await call<any>(
-      "subscriptions",
-      { part: "snippet", mine: true, maxResults: 50, order: "relevance", pageToken },
-      { units: 1, ttl: 60 * MIN, auth: true },
-    );
-    out.push(...(r.items ?? []).map(toChannel));
-    pageToken = r.nextPageToken;
-  } while (pageToken && out.length < 200);
+/** Fetches a feed plus `pages - 1` continuation pages. */
+async function paged(endpoint: "browse" | "search", body: Record<string, unknown>, pages: number, ttl: number): Promise<Json[]> {
+  const out = [await yt(endpoint, body, ttl)];
+  let token = continuationOf(out[0]);
+  while (token && out.length < pages) {
+    const next = await yt(endpoint, { continuation: token }, ttl);
+    out.push(next);
+    token = continuationOf(next);
+  }
   return out;
+}
+
+const videosOnly = (items: Item[]) => items.filter((i): i is Video => i.kind === "video");
+
+// ---- public queries ---------------------------------------------------------------
+
+let homeCache: Promise<{ loose: Item[]; shelves: Shelf[] }> | null = null;
+let homeAt = 0;
+
+/** The signed-in Home feed: recommendations plus YouTube's titled shelves. */
+export function homeFeed(): Promise<{ loose: Item[]; shelves: Shelf[] }> {
+  if (!homeCache || Date.now() - homeAt > 10 * MIN) {
+    homeAt = Date.now();
+    homeCache = paged("browse", { browseId: "FEwhat_to_watch" }, 3, 10 * MIN).then((pages) => {
+      const parts = pages.map(collectWithShelves);
+      return {
+        loose: dedupe(parts.flatMap((p) => p.loose)),
+        shelves: parts.flatMap((p) => p.shelves),
+      };
+    });
+    homeCache.catch(() => (homeCache = null));
+  }
+  return homeCache;
+}
+
+/** Subscribed channels, in the order YouTube lists them. */
+export async function subscribedChannels(): Promise<Channel[]> {
+  const r = await yt("browse", { browseId: "FEsubscriptions" }, 60 * MIN);
+  return dedupe(collect(r).filter((i): i is Channel => i.kind === "channel"));
+}
+
+const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+function ago(iso: string): string {
+  const sec = (Date.parse(iso) - Date.now()) / 1000;
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 31536000],
+    ["month", 2592000],
+    ["week", 604800],
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+  ];
+  for (const [u, n] of units) if (Math.abs(sec) >= n) return rtf.format(Math.round(sec / n), u);
+  return "just now";
 }
 
 /**
- * The API has no "subscriptions feed", so it is assembled: each channel's
- * uploads playlist (UC… → UU…) is read and the results merged by date.
- * Costs ~1 unit per channel; capped to the most relevant channels.
+ * Newest uploads across subscriptions. This client gets the channel list (not
+ * the video feed) from the account's subscriptions page, so the videos come
+ * from each channel's public RSS feed, merged newest first.
  */
-export async function subscriptionFeed(channels: Channel[], maxChannels = 30): Promise<Video[]> {
-  const ids = await Promise.all(
-    channels.slice(0, maxChannels).map(async (c) => {
-      const uploads = "UU" + c.id.slice(2);
-      try {
-        const r = await call<any>(
-          "playlistItems",
-          { part: "contentDetails", playlistId: uploads, maxResults: 6 },
-          { units: 1, ttl: 15 * MIN },
-        );
-        return (r.items ?? []).map((i: any) => ({
-          id: i.contentDetails?.videoId as string,
-          at: Date.parse(i.contentDetails?.videoPublishedAt ?? "") || 0,
-        }));
-      } catch {
-        return [];
-      }
-    }),
-  );
-  const newest = ids
-    .flat()
-    .filter((x) => x.id)
-    .sort((a, b) => b.at - a.at)
-    .slice(0, 50)
-    .map((x) => x.id);
-  return videosById(newest);
+export async function subscriptionFeed(): Promise<Video[]> {
+  if (isDemo()) return videosOnly(collect(await yt("browse", { browseId: "FEdemo" }, 0)));
+  const channels = await subscribedChannels();
+  const xmls = await invoke<string[]>("yt_channel_feeds", { ids: channels.slice(0, 60).map((c) => c.id) });
+  const YT = "http://www.youtube.com/xml/schemas/2015";
+  const MEDIA = "http://search.yahoo.com/mrss/";
+  const entries: { at: number; video: Video }[] = [];
+  for (const xml of xmls) {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    for (const e of Array.from(doc.getElementsByTagName("entry"))) {
+      const id = e.getElementsByTagNameNS(YT, "videoId")[0]?.textContent ?? "";
+      const published = e.getElementsByTagName("published")[0]?.textContent ?? "";
+      if (!id || !published) continue;
+      const views = Number(e.getElementsByTagNameNS(MEDIA, "statistics")[0]?.getAttribute("views") ?? NaN);
+      entries.push({
+        at: Date.parse(published),
+        video: video({
+          id,
+          title: e.getElementsByTagName("title")[0]?.textContent ?? "",
+          channelId: e.getElementsByTagNameNS(YT, "channelId")[0]?.textContent ?? "",
+          channelTitle: e.getElementsByTagName("author")[0]?.getElementsByTagName("name")[0]?.textContent ?? "",
+          description: e.getElementsByTagNameNS(MEDIA, "description")[0]?.textContent ?? "",
+          viewsText: Number.isFinite(views) ? `${compact.format(views)} views` : "",
+          ageText: ago(published),
+        }),
+      });
+    }
+  }
+  return entries.sort((x, y) => y.at - x.at).slice(0, 60).map((x) => x.video);
 }
 
-export async function likedVideos(): Promise<Video[]> {
-  const r = await call<any>(
-    "videos",
-    { part: "snippet,contentDetails,statistics", myRating: "like", maxResults: 50 },
-    { units: 1, ttl: 10 * MIN, auth: true },
-  );
-  return (r.items ?? []).map(toVideo);
+export async function history(): Promise<Video[]> {
+  return dedupe(videosOnly(collect(await yt("browse", { browseId: "FEhistory" }, 5 * MIN))));
 }
+
+export async function playlistVideos(playlistId: string): Promise<Video[]> {
+  const pages = await paged("browse", { browseId: `VL${playlistId}` }, 3, 10 * MIN);
+  return dedupe(videosOnly(pages.flatMap((p) => collect(p))));
+}
+
+export const watchLater = () => playlistVideos("WL");
+export const likedVideos = () => playlistVideos("LL");
 
 export async function myPlaylists(): Promise<Playlist[]> {
-  const r = await call<any>(
-    "playlists",
-    { part: "snippet,contentDetails", mine: true, maxResults: 50 },
-    { units: 1, ttl: 10 * MIN, auth: true },
-  );
-  return (r.items ?? []).map(toPlaylist);
+  const pick = (r: Json) =>
+    collect(r).filter((i): i is Playlist => i.kind === "playlist" && !["WL", "LL"].includes(i.id));
+  const items = pick(await yt("browse", { browseId: "FEplaylist_aggregation" }, 10 * MIN).catch(() => null));
+  return items.length ? dedupe(items) : dedupe(pick(await yt("browse", { browseId: "FElibrary" }, 10 * MIN)));
 }
 
-export async function myChannel(): Promise<Channel | null> {
-  const r = await call<any>("channels", { part: "snippet", mine: true }, { units: 1, ttl: 60 * MIN, auth: true });
-  return r.items?.length ? toChannel(r.items[0]) : null;
+export async function search(query: string): Promise<Item[]> {
+  const pages = await paged("search", { query }, 2, 60 * MIN);
+  return dedupe(pages.flatMap((p) => collect(p)));
 }
 
-/** Home shelves: chart categories that reliably have a mostPopular chart. */
-export const HOME_CATEGORIES: { id?: string; title: string }[] = [
-  { title: "Trending now" },
-  { id: "10", title: "Music" },
-  { id: "20", title: "Gaming" },
-  { id: "17", title: "Sports" },
-  { id: "28", title: "Science & Technology" },
-  { id: "24", title: "Entertainment" },
-  { id: "23", title: "Comedy" },
-  { id: "25", title: "News" },
-  { id: "1", title: "Film & Animation" },
-  { id: "2", title: "Cars & Vehicles" },
-];
+export async function channel(id: string): Promise<Channel> {
+  const r = await yt("browse", { browseId: id }, 60 * MIN);
+  const meta = r?.metadata?.channelMetadataRenderer ?? {};
+  const view = find(r?.header, (x) => x?.pageHeaderViewModel);
+  const legacy = r?.header?.c4TabbedHeaderRenderer;
+  const parts: string[] = [];
+  find(view?.metadata, (x) => {
+    if (x?.metadataParts) x.metadataParts.forEach((p: Json) => parts.push(tx(p.text)));
+    return undefined;
+  });
+  const avatar =
+    largest(find(view?.image, (x) => x?.sources)) || largest(legacy?.avatar?.thumbnails) || largest(meta.avatar?.thumbnails);
+  const banner = largest(find(view?.banner, (x) => x?.sources)) || largest(legacy?.banner?.thumbnails);
+  return {
+    kind: "channel",
+    id,
+    title: meta.title ?? tx(legacy?.title) ?? tx(view?.title),
+    description: meta.description ?? "",
+    avatar,
+    banner: banner ? banner.replace(/=w\d+.*$/, "=w2560") : undefined,
+    subscribersText: parts.find((t) => /subscriber/i.test(t)) ?? tx(legacy?.subscriberCountText),
+    videosText: parts.find((t) => /video/i.test(t)) ?? tx(legacy?.videosCountText),
+  };
+}
+
+/** Channel tabs by their (stable, public) browse params. */
+const VIDEOS_TAB = "EgZ2aWRlb3PyBgQKAjoA";
+const PLAYLISTS_TAB = "EglwbGF5bGlzdHPyBgQKAkIA";
+
+export async function channelVideos(id: string): Promise<Video[]> {
+  const pages = await paged("browse", { browseId: id, params: VIDEOS_TAB }, 2, 30 * MIN);
+  return dedupe(videosOnly(pages.flatMap((p) => collect(p))));
+}
+
+export async function channelPlaylists(id: string): Promise<Playlist[]> {
+  const r = await yt("browse", { browseId: id, params: PLAYLISTS_TAB }, 60 * MIN);
+  return dedupe(collect(r).filter((i): i is Playlist => i.kind === "playlist"));
+}
+
+/** Description and related videos for the player's side panel. */
+export async function watchNext(videoId: string): Promise<{ description: string; related: Video[] }> {
+  const r = await yt("next", { videoId }, 30 * MIN);
+  const secondary = find(r, (x) => x?.videoSecondaryInfoRenderer);
+  const description = tx(secondary?.attributedDescription) || tx(secondary?.description);
+  const results = find(r, (x) => x?.secondaryResults) ?? {};
+  return { description, related: dedupe(videosOnly(collect(results))).filter((v) => v.id !== videoId) };
+}
+
+export async function account(): Promise<Account | null> {
+  const r = await yt("account/account_menu", {}, 60 * MIN);
+  const h = find(r, (x) => x?.activeAccountHeaderRenderer);
+  return h ? { name: tx(h.accountName), avatar: largest(h.accountPhoto?.thumbnails) } : null;
+}

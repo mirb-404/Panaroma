@@ -1,13 +1,14 @@
 import { openKV, type KV } from "./platform";
 
 export interface Settings {
-  clientId: string;
-  clientSecret: string;
+  /** Country for YouTube results (the `gl` parameter). */
   region: string;
   startFullscreen: boolean;
   reducedMotion: boolean;
   uiScale: number;
   autoplayNext: boolean;
+  /** Zoom 16:9 video to fill ultrawide screens (theater layout). */
+  ultrawideFill: boolean;
   /** What plays at launch: the Panorama startup movie, the user's own video, or nothing. */
   startup: "default" | "video" | "off";
   /** Imported copy of the user's startup video (in app data). */
@@ -16,30 +17,29 @@ export interface Settings {
   uiSounds: "steam" | "panorama" | "off";
   uiVolume: number;
   searchHistory: string[];
-  /** Quota units spent, keyed by the Pacific-time day the API resets on. */
-  quota: { day: string; units: number };
+  /** The signed-in account's picture and name, cached for instant display. */
+  avatarUrl: string;
+  accountName: string;
+  /** Bumped when a default changes and saved settings need a one-time update. */
+  version: number;
 }
 
-// `.env.local` values are a development convenience only. Each `import.meta.env.X`
-// sits behind a literal DEV check so Vite strips it from release builds: the
-// installer never contains the developer's credentials. Users bring their own
-// via Settings → Sign-in setup.
-const dev = (v: string | undefined) => (import.meta.env.DEV ? (v ?? "") : "");
 const defaults: Settings = {
-  clientId: "",
-  clientSecret: "",
   region: guessRegion(),
-  startFullscreen: false,
+  startFullscreen: true,
   reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
   uiScale: 1,
   autoplayNext: true,
+  ultrawideFill: true,
   startup: "default",
   startupVideo: "",
   startupVideoVersion: 0,
-  uiSounds: "steam",
+  uiSounds: "panorama",
   uiVolume: 0.7,
   searchHistory: [],
-  quota: { day: "", units: 0 },
+  avatarUrl: "",
+  accountName: "",
+  version: 3,
 };
 
 function guessRegion(): string {
@@ -58,19 +58,19 @@ export async function loadSettings(): Promise<Settings> {
   if (saved.introAnimation === false && saved.startup === undefined) saved.startup = "off";
   if (saved.startup === "ident") saved.startup = "default";
   delete saved.introAnimation;
-  delete saved.apiKey;
+  // Leftovers from the Data API / OAuth era.
+  for (const k of ["apiKey", "clientId", "clientSecret", "quota"]) delete saved[k];
+  // One-time updates when a default changes.
+  const v = (saved.version as number) ?? 1;
+  if (v < 2) saved.startFullscreen = true; // v2: fullscreen by default
+  if (v < 3 && saved.uiSounds === "steam") saved.uiSounds = "panorama"; // v3: Panorama sounds by default
+  saved.version = 3;
   current = { ...defaults, ...(saved as Partial<Settings>) };
   return current;
 }
 
 export function settings(): Readonly<Settings> {
   return current;
-}
-
-export function effectiveOAuth(): { clientId: string; clientSecret: string } {
-  if (current.clientId) return { clientId: current.clientId, clientSecret: current.clientSecret };
-  if (!import.meta.env.DEV) return { clientId: "", clientSecret: "" };
-  return { clientId: dev(import.meta.env.VITE_GOOGLE_CLIENT_ID), clientSecret: dev(import.meta.env.VITE_GOOGLE_CLIENT_SECRET) };
 }
 
 export function updateSettings(patch: Partial<Settings>): void {
@@ -82,15 +82,4 @@ export function updateSettings(patch: Partial<Settings>): void {
 export function onSettings(l: (s: Settings) => void): () => void {
   listeners.add(l);
   return () => listeners.delete(l);
-}
-
-/** The Data API quota resets at midnight Pacific time. */
-export function quotaDay(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
-}
-
-export function addQuota(units: number): void {
-  const day = quotaDay();
-  const used = current.quota.day === day ? current.quota.units : 0;
-  updateSettings({ quota: { day, units: used + units } });
 }

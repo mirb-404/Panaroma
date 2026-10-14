@@ -1,13 +1,9 @@
-import { invoke, isTauri } from "./platform";
-import { effectiveOAuth } from "./settings";
+// Sign-in state is the youtube.com session in the app's browser profile. Signing
+// in opens Google's own login page in a separate window (handled in Rust); there
+// is no API key or OAuth client to configure.
+import { invoke, isTauri, listen } from "./platform";
 
-interface Session {
-  access_token: string;
-  expires_at: number;
-}
-
-let session: Session | null = null;
-let refreshing: Promise<string | null> | null = null;
+let signed = false;
 const listeners = new Set<(signedIn: boolean) => void>();
 
 export function onAuth(l: (signedIn: boolean) => void): () => void {
@@ -15,46 +11,48 @@ export function onAuth(l: (signedIn: boolean) => void): () => void {
   return () => listeners.delete(l);
 }
 
-function set(s: Session | null) {
-  const changed = !!s !== !!session;
-  session = s;
-  if (changed) listeners.forEach((l) => l(!!s));
+function set(v: boolean) {
+  if (v === signed) return;
+  signed = v;
+  listeners.forEach((l) => l(v));
 }
 
-export const signedIn = () => !!session;
-export const oauthConfigured = () => isTauri && !!effectiveOAuth().clientId;
+export const signedIn = () => signed;
+/** Signing in needs the desktop app (the browser-only dev build can't). */
+export const canSignIn = () => isTauri;
 
-/** Restores a previous sign-in from the stored refresh token, if any. */
+const isDemo = () => import.meta.env.DEV && new URLSearchParams(location.search).has("demo");
+
 export async function restoreSession(): Promise<void> {
-  if (!oauthConfigured()) return;
-  await accessToken().catch(() => null);
+  if (isDemo()) return set(true);
+  if (!isTauri) return;
+  set(await invoke<boolean>("yt_signed_in").catch(() => false));
 }
 
-/** Set once we know there is no stored sign-in, so signed-out browsing doesn't
- *  ask the Rust side on every request. */
-let knownSignedOut = false;
-
-/** A valid access token, refreshed through the Rust side when it has expired. */
-export async function accessToken(): Promise<string | null> {
-  if (session && session.expires_at > Date.now()) return session.access_token;
-  if (!oauthConfigured() || (knownSignedOut && !session)) return null;
-  refreshing ??= invoke<Session | null>("oauth_refresh", effectiveOAuth())
-    .then((s) => {
-      set(s);
-      knownSignedOut = !s;
-      return s?.access_token ?? null;
-    })
-    .finally(() => (refreshing = null));
-  return refreshing;
+/** Opens Google's sign-in window; resolves once signed in, rejects "cancelled" if closed. */
+export function signIn(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const off: (() => void)[] = [];
+    const done = (fn: () => void) => {
+      off.forEach((f) => f());
+      fn();
+    };
+    listen<boolean>("yt-auth", () =>
+      done(() => {
+        set(true);
+        resolve();
+      }),
+    ).then((f) => off.push(f));
+    listen("yt-signin-closed", () => done(() => (signed ? resolve() : reject("cancelled")))).then((f) => off.push(f));
+    invoke("yt_open_sign_in").catch((e) => done(() => reject(String(e))));
+  });
 }
 
-export async function signIn(): Promise<void> {
-  set(await invoke<Session>("oauth_sign_in", effectiveOAuth()));
-  knownSignedOut = false;
+export function cancelSignIn() {
+  invoke("yt_close_sign_in").catch(() => {});
 }
 
 export async function signOut(): Promise<void> {
-  await invoke("oauth_sign_out");
-  knownSignedOut = true;
-  set(null);
+  await invoke("yt_sign_out");
+  set(false);
 }

@@ -114,7 +114,7 @@ html.reduced-motion *::after {
   position: fixed;
   z-index: 10;
   inset: 0 auto 0 0;
-  width: 19rem;
+  width: 24rem;
   padding: 2.2rem 0 2rem;
   display: flex;
   flex-direction: column;
@@ -122,11 +122,13 @@ html.reduced-motion *::after {
   transition: opacity 0.3s var(--ease);
 }
 
+/* Solid behind the labels (so page text can't show through them), then a
+   soft fade into the page. */
 .rail::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(to right, rgba(6, 6, 9, 0.97) 55%, rgba(6, 6, 9, 0));
+  background: linear-gradient(to right, rgb(6, 6, 9) 0, rgb(6, 6, 9) 16rem, rgba(6, 6, 9, 0.85) 18rem, rgba(6, 6, 9, 0) 100%);
   opacity: 0;
   transition: opacity 0.3s var(--ease);
 }
@@ -232,17 +234,35 @@ html.reduced-motion *::after {
 }
 
 .rail-avatar {
+  position: relative;
   margin-top: auto;
   margin-left: 1.5rem;
   width: 2.4rem;
   height: 2.4rem;
   border-radius: 50%;
-  background: var(--faint) center / cover;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.rail-avatar-icon {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+.rail-avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   opacity: 0;
   transition: opacity 0.3s;
 }
 
-.rail-avatar.has {
+.rail-avatar.has .rail-avatar-img {
   opacity: 1;
 }
 
@@ -260,11 +280,13 @@ body.immersive .clock {
 }
 
 .stage {
-  transition: opacity 0.3s var(--ease);
+  transition: opacity 0.3s var(--ease), transform 0.4s var(--ease);
 }
 
 body.rail-open .stage {
-  opacity: 0.35;
+  opacity: 0.18;
+  transform: translateX(14rem);
+  pointer-events: none;
 }
 
 .screen {
@@ -626,7 +648,8 @@ body.rail-open .stage {
   width: 7rem;
   height: 7rem;
   border-radius: 50%;
-  background: var(--faint) center / cover;
+  object-fit: cover;
+  background: var(--faint);
   box-shadow: 0 0.8rem 2.4rem rgba(0, 0, 0, 0.5);
   flex: none;
 }
@@ -1011,7 +1034,7 @@ body.rail-open .stage {
 
 .search-results {
   position: absolute;
-  inset: 11rem 0 0 0;
+  inset: 8.6rem 0 0 0;
 }
 
 /* ---- settings ------------------------------------------------------------------------ */
@@ -1102,6 +1125,7 @@ body.rail-open .stage {
   inset: 0;
   z-index: 20;
   background: #000;
+  overflow: hidden;
 }
 
 .player-ambient {
@@ -1473,4 +1497,131 @@ body.rail-open .stage {
   font-weight: 600;
   opacity: 0;
   animation: fade-in 0.5s 1.2s var(--ease) forwards;
+}
+
+/* ---- sign-in waiting ----------------------------------------------------------- */
+
+.signin-wait .dialog-panel {
+  width: min(52rem, 90vw);
+}
+
+.wait-spinner {
+  width: 2.6rem;
+  height: 2.6rem;
+  margin-bottom: 1.4rem;
+  border-radius: 50%;
+  border: 0.25rem solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wait-tips {
+  margin: 1.4rem 0 0.6rem;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.wait-tips b {
+  color: var(--fg);
+}
+
+/* ---- sign-in wizard -------------------------------------------------------------- */
+
+.setup-panel.wizard {
+  width: min(58rem, 92vw);
+}
+
+.wizard-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1.6rem 0 1.2rem;
+}
+
+.wizard-progress .dot {
+  width: 2.4rem;
+  height: 0.35rem;
+  border-radius: 99rem;
+  background: rgba(255, 255, 255, 0.15);
+  transition: background-color 0.3s;
+}
+
+.wizard-progress .dot.done {
+  background: rgba(255, 61, 72, 0.55);
+}
+
+.wizard-progress .dot.now {
+  background: var(--accent);
+}
+
+.wizard-count {
+  margin-left: 0.6rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.wizard-step {
+  min-height: 9rem;
+}
+
+.wizard-step h3 {
+  font-size: 1.7rem;
+  font-weight: 700;
+  margin-bottom: 0.6rem;
+}
+
+.wizard-step p {
+  font-size: 1.2rem;
+  line-height: 1.5;
+}
+
+.wizard-step .setup-note {
+  margin-top: 0.5rem;
+  font-size: 1rem;
+}
+
+.wizard-watch {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  color: #7ee2a8;
+  font-size: 1rem !important;
+  font-weight: 600;
+}
+
+.wait-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.wizard-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-top: 1.6rem;
+}
+
+.wizard-btn {
+  justify-content: center;
+  padding: 0 1.8rem;
+}
+
+.wizard-btn.primary {
+  background: rgba(255, 61, 72, 0.3);
 }

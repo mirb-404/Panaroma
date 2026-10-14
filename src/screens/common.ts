@@ -1,33 +1,38 @@
 import { ApiError } from "../api";
-import { oauthConfigured, signIn } from "../auth";
+import { canSignIn, cancelSignIn, signIn } from "../auth";
 import { messagePanel, router } from "../router";
 import { toast } from "../ui/chrome";
-import { openOAuthSetup } from "../ui/oauthsetup";
+import { openSignInWait } from "../ui/signin";
 
 /** Maps a load failure to a helpful full-screen message with a next step. */
 export function errorPanel(err: unknown) {
   const reason = err instanceof ApiError ? err.reason : "";
   const msg = err instanceof Error ? err.message : String(err);
   if (reason === "signedOut")
-    return oauthConfigured()
-      ? messagePanel("Welcome to Panorama", "Sign in with your Google account to watch YouTube — your subscriptions, likes and playlists come along.", [
+    return canSignIn()
+      ? messagePanel("Welcome to Panorama", "Sign in with your Google account to watch YouTube — your recommendations, subscriptions, history and playlists come along.", [
           { label: "Sign in with Google", run: () => signInFlow() },
         ])
-      : messagePanel(
-          "Welcome to Panorama",
-          "Connect your Google account to start watching. First-time setup takes about 3 minutes: you create a free Google Cloud sign-in client and paste it into Panorama. The guide walks you through it.",
-          [{ label: "Set up sign-in", run: () => openOAuthSetup() }],
-        );
+      : messagePanel("Welcome to Panorama", "Signing in needs the Panorama desktop app.", []);
   if (reason === "empty") return messagePanel("Nothing here yet", "", []);
   return messagePanel("Couldn't load this", msg, [{ label: "Retry", run: () => router.resetTab(router.tab) }]);
 }
 
+let signingIn = false;
+
 export async function signInFlow() {
-  toast("Finish signing in in your browser…");
+  if (signingIn) return;
+  signingIn = true;
+  const wait = openSignInWait(cancelSignIn);
   try {
     await signIn();
+    wait.close();
     toast("Signed in", "success"); // the onAuth listener in main.ts rebuilds the tabs
   } catch (e) {
-    toast(`Sign-in failed: ${e}`, "error", 5000);
+    wait.close();
+    if (String(e) === "cancelled") toast("Sign-in cancelled");
+    else toast(`Sign-in failed: ${e}`, "error", 6000);
+  } finally {
+    signingIn = false;
   }
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-yt-channel-feeds"
+description = "Enables the yt_channel_feeds command without any pre-configured scope."
+commands.allow = ["yt_channel_feeds"]
+
+[[permission]]
+identifier = "deny-yt-channel-feeds"
+description = "Denies the yt_channel_feeds command without any pre-configured scope."
+commands.deny = ["yt_channel_feeds"]

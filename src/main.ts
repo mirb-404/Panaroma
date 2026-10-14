@@ -1,6 +1,6 @@
 import "./styles.css";
-import { myChannel } from "./api";
-import { onAuth, restoreSession, signedIn } from "./auth";
+import { account } from "./api";
+import { canSignIn, onAuth, restoreSession, signedIn } from "./auth";
 import { h } from "./dom";
 import { initPad, onPadStatus } from "./input";
 import { appReady, isFullscreen, quitApp, setFullscreen } from "./platform";
@@ -8,16 +8,21 @@ import { router } from "./router";
 import { searchScreen } from "./screens/search";
 import { settingsScreen } from "./screens/settings";
 import { homeScreen, libraryScreen, subscriptionsScreen } from "./screens/tabs";
-import { loadSettings, settings } from "./settings";
+import { loadSettings, settings, updateSettings } from "./settings";
 import { applyScale, backdropEl, createClock, createRail, toast, toastHost } from "./ui/chrome";
 import { playStartup } from "./ui/intro";
-import { openOAuthSetup } from "./ui/oauthsetup";
+import { signInFlow } from "./screens/common";
 import { loadSounds } from "./sound";
 import { confirmDialog } from "./ui/textentry";
 
 async function main() {
   await loadSettings();
   applyScale();
+  let resizeRaf = 0;
+  window.addEventListener("resize", () => {
+    cancelAnimationFrame(resizeRaf);
+    resizeRaf = requestAnimationFrame(applyScale);
+  });
   loadSounds();
 
   const rail = createRail();
@@ -46,20 +51,32 @@ async function main() {
   };
 
   // The intro is the first frame the user sees; the app loads behind it.
-  if (settings().startFullscreen) setFullscreen(true);
+  if (settings().startFullscreen) setFullscreen(true).then(() => requestAnimationFrame(applyScale));
   const startup = playStartup();
   requestAnimationFrame(() => requestAnimationFrame(appReady));
 
-  // First boot (or signed out): go straight to Google sign-in once the intro
-  // is done. Credentials and the session are remembered after that.
-  Promise.all([startup, restoreSession()]).then(() => {
-    if (!signedIn()) openOAuthSetup();
+  // First boot (or signed out): open Google's sign-in once the intro is done.
+  // The session is remembered after that.
+  const restored = restoreSession();
+  Promise.all([startup, restored]).then(() => {
+    if (!signedIn() && canSignIn()) signInFlow();
   });
 
-  // Don't let a slow token refresh hold the first paint hostage.
-  await Promise.race([restoreSession(), new Promise((r) => setTimeout(r, 2500))]);
-  const syncAvatar = () =>
-    signedIn() ? myChannel().then((c) => rail.setAvatar(c?.avatar ?? null)).catch(() => {}) : rail.setAvatar(null);
+  await restored;
+  rail.setAvatar(settings().avatarUrl || null);
+  const syncAvatar = () => {
+    if (!signedIn()) {
+      rail.setAvatar(null);
+      updateSettings({ avatarUrl: "", accountName: "" });
+      return;
+    }
+    account()
+      .then((a) => {
+        rail.setAvatar(a?.avatar || null);
+        updateSettings({ avatarUrl: a?.avatar ?? "", accountName: a?.name ?? "" });
+      })
+      .catch(() => {});
+  };
   syncAvatar();
   onAuth(() => {
     syncAvatar();
@@ -72,12 +89,6 @@ async function main() {
   onPadStatus((e) => {
     if (e.type === "connected") toast(`${e.name} connected`);
     else if (e.type === "disconnected") toast("Controller disconnected");
-  });
-
-  let resizeRaf = 0;
-  window.addEventListener("resize", () => {
-    cancelAnimationFrame(resizeRaf);
-    resizeRaf = requestAnimationFrame(applyScale);
   });
 
   // TV feel: the cursor disappears when it's not being used.

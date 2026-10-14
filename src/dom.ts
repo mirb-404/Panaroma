@@ -45,10 +45,6 @@ const ICONS = {
 
 // ---- formatting -----------------------------------------------------------------
 
-const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
-export const fmtCount = (n: number | undefined, noun: string) =>
-  n === undefined ? "" : `${compact.format(n)} ${noun}${n === 1 ? "" : "s"}`;
-
 export function fmtDuration(sec: number): string {
   if (!sec) return "";
   const h = Math.floor(sec / 3600);
@@ -58,24 +54,7 @@ export function fmtDuration(sec: number): string {
   return `${h ? h + ":" : ""}${mm}:${String(s).padStart(2, "0")}`;
 }
 
-const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-export function fmtAge(iso: string): string {
-  const t = Date.parse(iso);
-  if (!t) return "";
-  const sec = (t - Date.now()) / 1000;
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["year", 31536000],
-    ["month", 2592000],
-    ["week", 604800],
-    ["day", 86400],
-    ["hour", 3600],
-    ["minute", 60],
-  ];
-  for (const [u, s] of units) if (Math.abs(sec) >= s) return rtf.format(Math.round(sec / s), u);
-  return "just now";
-}
-
-/** Decodes HTML entities the Data API leaves in titles (&amp; &#39; …). */
+/** Decodes HTML entities that can appear in titles (&amp; &#39; …). */
 const decoder = document.createElement("textarea");
 export function decodeEntities(s: string): string {
   if (!s.includes("&")) return s;

@@ -18,9 +18,8 @@ export function searchScreen(): Screen {
   const field = h("button.search-field", { onclick: () => edit() }, icon("search"), h("span"));
   const chips = h("div.chips");
   const bar = h("div.search-bar", null, field, chips);
-  const note = h("p.search-note", null, "Each search uses 100 of the 10,000 daily YouTube API units.");
   const host = h("div.search-results");
-  const el = h("section.screen.search-screen", null, bar, note, host);
+  const el = h("section.screen.search-screen", null, bar, host);
 
   const barItems = () => [field, ...chips.children] as HTMLElement[];
 

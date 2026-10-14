@@ -1,5 +1,5 @@
 import type { Item } from "../api";
-import { decodeEntities, fmtAge, fmtCount, fmtDuration, h } from "../dom";
+import { decodeEntities, h } from "../dom";
 
 export interface CardEl extends HTMLElement {
   _img?: HTMLImageElement;
@@ -12,8 +12,8 @@ export function card(item: Item, onClick: () => void): CardEl {
     el = h(
       "div.card.card-channel",
       { onclick: onClick },
-      h("div.thumb.round", null, h("img", { alt: "", decoding: "async", draggable: "false" })),
-      h("div.meta", null, h("div.title", null, decodeEntities(item.title)), h("div.sub", null, fmtCount(item.subscribers, "subscriber"))),
+      h("div.thumb.round", null, h("img", { alt: "", decoding: "async", draggable: "false", referrerpolicy: "no-referrer" })),
+      h("div.meta", null, h("div.title", null, decodeEntities(item.title)), h("div.sub", null, item.subscribersText)),
     );
     el._src = item.avatar;
   } else if (item.kind === "playlist") {
@@ -24,7 +24,7 @@ export function card(item: Item, onClick: () => void): CardEl {
         "div.thumb",
         null,
         h("img", { alt: "", decoding: "async", draggable: "false" }),
-        h("div.stack-badge", null, item.count !== undefined ? `${item.count} videos` : "Playlist"),
+        h("div.stack-badge", null, item.countText || "Playlist"),
       ),
       h("div.meta", null, h("div.title", null, decodeEntities(item.title)), h("div.sub", null, item.channelTitle)),
     );
@@ -32,8 +32,8 @@ export function card(item: Item, onClick: () => void): CardEl {
   } else {
     const badge = item.live
       ? h("span.badge.live", null, "LIVE")
-      : item.durationSec
-        ? h("span.badge", null, fmtDuration(item.durationSec))
+      : item.durationText
+        ? h("span.badge", null, item.durationText)
         : null;
     el = h(
       "div.card",
@@ -43,7 +43,7 @@ export function card(item: Item, onClick: () => void): CardEl {
         "div.meta",
         null,
         h("div.title", null, decodeEntities(item.title)),
-        h("div.sub", null, [item.channelTitle, fmtCount(item.views, "view"), fmtAge(item.publishedAt)].filter(Boolean).join(" · ")),
+        h("div.sub", null, [item.channelTitle, item.viewsText, item.ageText].filter(Boolean).join(" · ")),
       ),
     );
     el._src = item.thumb;

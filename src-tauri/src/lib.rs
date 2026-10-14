@@ -1,6 +1,6 @@
 mod gamepad;
 mod media;
-mod oauth;
+mod youtube;
 
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -126,9 +126,12 @@ pub fn run() {
             set_fullscreen,
             is_fullscreen,
             quit_app,
-            oauth::oauth_sign_in,
-            oauth::oauth_refresh,
-            oauth::oauth_sign_out,
+            youtube::yt_signed_in,
+            youtube::yt_api,
+            youtube::yt_open_sign_in,
+            youtube::yt_close_sign_in,
+            youtube::yt_sign_out,
+            youtube::yt_channel_feeds,
             media::steam_sounds_available,
             media::read_steam_sound,
             media::import_startup_video,

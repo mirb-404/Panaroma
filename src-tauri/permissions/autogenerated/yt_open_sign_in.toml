@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-yt-open-sign-in"
+description = "Enables the yt_open_sign_in command without any pre-configured scope."
+commands.allow = ["yt_open_sign_in"]
+
+[[permission]]
+identifier = "deny-yt-open-sign-in"
+description = "Denies the yt_open_sign_in command without any pre-configured scope."
+commands.deny = ["yt_open_sign_in"]

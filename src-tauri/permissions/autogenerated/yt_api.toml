@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-yt-api"
+description = "Enables the yt_api command without any pre-configured scope."
+commands.allow = ["yt_api"]
+
+[[permission]]
+identifier = "deny-yt-api"
+description = "Denies the yt_api command without any pre-configured scope."
+commands.deny = ["yt_api"]

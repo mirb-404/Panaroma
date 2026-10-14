@@ -83,7 +83,10 @@ export function createRail() {
       h("span.rail-label", null, LABELS[t][0]),
     ),
   );
-  const avatar = h("div.rail-avatar");
+  const avatarImg = h("img.rail-avatar-img", { alt: "", referrerpolicy: "no-referrer", draggable: "false" });
+  const avatar = h("div.rail-avatar", { title: "Google account" }, icon("user", "icon rail-avatar-icon"), avatarImg);
+  avatarImg.onload = () => avatar.classList.add("has");
+  avatarImg.onerror = () => avatar.classList.remove("has");
   const el = h(
     "nav.rail",
     null,
@@ -96,8 +99,10 @@ export function createRail() {
   return {
     el,
     setAvatar(url: string | null) {
-      avatar.style.backgroundImage = url ? `url("${url}")` : "";
-      avatar.classList.toggle("has", !!url);
+      if (!url) {
+        avatar.classList.remove("has");
+        avatarImg.removeAttribute("src");
+      } else if (avatarImg.getAttribute("src") !== url) avatarImg.src = url;
     },
     setActive(t: TabId) {
       idx = TABS.indexOf(t);
@@ -162,7 +167,9 @@ export function createClock() {
 
 /** Root font size scales with window height so layouts are resolution-independent. */
 export function applyScale() {
-  const base = window.innerHeight / 54; // 20px at 1080p
+  // 20px at 1080p. Height drives the scale (TV-style); width caps it so 4:3,
+  // portrait and small windows don't overflow horizontally.
+  const base = Math.min(window.innerHeight / 54, window.innerWidth / 72);
   document.documentElement.style.fontSize = `${Math.max(12, base * settings().uiScale)}px`;
   document.documentElement.classList.toggle("reduced-motion", settings().reducedMotion);
   const ratio = window.innerWidth / window.innerHeight;

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-yt-sign-out"
+description = "Enables the yt_sign_out command without any pre-configured scope."
+commands.allow = ["yt_sign_out"]
+
+[[permission]]
+identifier = "deny-yt-sign-out"
+description = "Denies the yt_sign_out command without any pre-configured scope."
+commands.deny = ["yt_sign_out"]

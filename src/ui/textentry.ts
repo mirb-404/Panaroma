@@ -74,7 +74,7 @@ export function openTextEntry(o: TextEntryOptions) {
   }
 
   function sync() {
-    const shown = o.secret && value.length > 8 ? value.slice(0, 4) + "•".repeat(value.length - 8) + value.slice(-4) : value;
+    const shown = o.secret ? "•".repeat(Math.min(value.length, 48)) : value;
     field.replaceChildren(h("span", null, shown), h("span.caret"));
     grid.flat().forEach((b) => b.classList.remove("focused"));
     grid[r][c]?.classList.add("focused");
