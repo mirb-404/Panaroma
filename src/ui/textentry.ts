@@ -3,6 +3,7 @@
 import { h, icon } from "../dom";
 import { captureText, type ActionEvent } from "../input";
 import { router } from "../router";
+import { cue } from "../sound";
 
 const LAYOUT = ["abcdefghij", "klmnopqrst", "uvwxyz-_.@", "1234567890"];
 
@@ -80,6 +81,7 @@ export function openTextEntry(o: TextEntryOptions) {
   }
 
   function type(ch: string | null) {
+    cue("type");
     value = ch === null ? value.slice(0, -1) : value + ch;
     sync();
   }

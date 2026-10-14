@@ -10,6 +10,7 @@ import { openExternal } from "../platform";
 import type { Screen } from "../router";
 import { openChannel } from "../routes";
 import { settings } from "../settings";
+import { cue } from "../sound";
 import { setBackdrop, toast } from "../ui/chrome";
 
 declare global {
@@ -276,6 +277,7 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
     if (!player?.getCurrentTime) return;
     const d = player.getDuration() || Infinity;
     pendingSeek = Math.min(Math.max(0, (pendingSeek ?? player.getCurrentTime()) + delta), d - 1);
+    cue(delta > 0 ? "sliderUp" : "sliderDown");
     flash(`${delta > 0 ? "▶▶" : "◀◀"}  ${fmtDuration(pendingSeek) || "0:00"}`);
     tickProgress();
     clearTimeout(seekCommit);
@@ -289,6 +291,7 @@ export function playerScreen(first: api.Video, queue: api.Video[]): Screen {
     if (!player?.getVolume) return;
     const v = Math.min(100, Math.max(0, player.getVolume() + delta));
     player.setVolume(v);
+    cue("volume");
     if (v > 0 && player.isMuted()) player.unMute();
     flash(`Volume ${v}`);
     stateEl.textContent = `Volume ${v}`;

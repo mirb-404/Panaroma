@@ -13,28 +13,33 @@ import { openTextEntry } from "./textentry";
 
 /** Neutral links: they open in whichever project the user has selected. */
 export const YT_API_URL = "https://console.cloud.google.com/apis/library/youtube.googleapis.com";
-export const CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
+export const CREATE_CLIENT_URL = "https://console.cloud.google.com/auth/clients/create";
 
 const ID_SUFFIX = ".apps.googleusercontent.com";
 
 const mask = (s: string) => (s.length <= 12 ? s : `${s.slice(0, 8)}…${s.slice(-6)}`);
 
+let open = false;
+
 export function openOAuthSetup() {
-  let idx = 0;
+  if (open) return;
+  open = true;
+  // Returning users with saved credentials land right on "Sign in".
+  let idx = settings().clientId && settings().clientSecret ? 4 : 0;
 
   const steps = h(
     "ol.setup-steps",
     null,
     h("li", null, "Open the ", h("b", null, "YouTube Data API v3"), " page below and click ", h("b", null, "Enable"),
       h("span.setup-note", null, "Sign in to Google Cloud and create a project if it asks. It's free.")),
-    h("li", null, "Open ", h("b", null, "Credentials"), " → ", h("b", null, "Create credentials"), " → ", h("b", null, "OAuth client ID"), ".",
+    h("li", null, "Open ", h("b", null, "Create OAuth client"), " below (or ", h("b", null, "Credentials"), " → ", h("b", null, "Create credentials"), " → ", h("b", null, "OAuth client ID"), ").",
       h("span.setup-note", null, "If Google asks you to configure the consent screen first, choose External, enter an app name and your email, and add your Gmail under Test users.")),
     h("li", null, "Application type: ", h("b", null, "Desktop app"), " → ", h("b", null, "Create"), "."),
     h("li", null, "Copy the ", h("b", null, "Client ID"), " and ", h("b", null, "Client secret"), " and paste them below."),
   );
 
   const linkApi = h("button.setup-btn.link", { onclick: () => openExternal(YT_API_URL) }, icon("external"), h("span", null, "Open YouTube Data API v3 page"));
-  const linkCreds = h("button.setup-btn.link", { onclick: () => openExternal(CREDENTIALS_URL) }, icon("external"), h("span", null, "Open Credentials page"));
+  const linkCreds = h("button.setup-btn.link", { onclick: () => openExternal(CREATE_CLIENT_URL) }, icon("external"), h("span", null, "Create OAuth client"));
   const idBtn = h("button.setup-btn.field", { onclick: () => editId() });
   const secretBtn = h("button.setup-btn.field", { onclick: () => editSecret() });
   const signInBtn = h("button.setup-btn.primary", { onclick: () => signIn() }, "Sign in with Google");
@@ -113,6 +118,7 @@ export function openOAuthSetup() {
   render();
   router.openOverlay({
     el,
+    onClose: () => (open = false),
     onAction(e: ActionEvent) {
       // Two link buttons sit side by side; everything else is a vertical list.
       if (e.action === "left" && idx === 1) idx = 0;

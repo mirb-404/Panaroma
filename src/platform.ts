@@ -80,3 +80,22 @@ export async function openKV(file: string): Promise<KV> {
     },
   };
 }
+
+/** Native file picker for a video; returns the chosen path. */
+export async function pickVideoFile(): Promise<string | null> {
+  if (!isTauri) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const r = await open({
+    multiple: false,
+    directory: false,
+    title: "Choose a startup video",
+    filters: [{ name: "Video", extensions: ["mp4", "m4v", "webm", "mov"] }],
+  });
+  return typeof r === "string" ? r : null;
+}
+
+/** URL for a local file inside the asset-protocol scope (the startup video). */
+export async function fileSrc(path: string): Promise<string> {
+  const { convertFileSrc } = await import("@tauri-apps/api/core");
+  return convertFileSrc(path);
+}

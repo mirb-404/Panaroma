@@ -1,0 +1,236 @@
+<!doctype html>
+<!--
+  Panorama TV startup movie — the scene, rendered frame by frame by render.mjs.
+  window.render(t) draws the frame at time t (seconds); window.renderAudio()
+  synthesizes the soundtrack and returns a WAV as base64.
+
+  Timeline (5.7 s, 1920×1080):
+    0.00–1.70  mark + "PANORAMA TV" wordmark hold on black
+    1.70–2.15  wordmark slides back into the mark; the mark glides to center
+    2.40–2.90  the mark flashes: white → blush → Panorama red → deep red
+    2.85–4.10  the mark becomes a thin outline that unwinds and fades
+    4.10–5.70  black while the sound decays
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; width: 1920px; height: 1080px; background: #000; overflow: hidden; }
+  svg { display: block; }
+  text { font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; fill: #fff; }
+</style>
+</head>
+<body>
+<svg id="s" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <!-- The play triangle is cut out of the solid mark. -->
+    <mask id="cut">
+      <rect id="cutRect" fill="#fff" />
+      <path id="cutTri" fill="#000" />
+    </mask>
+    <clipPath id="textClip"><rect id="clipRect" y="0" height="1080" /></clipPath>
+  </defs>
+  <g clip-path="url(#textClip)">
+    <text id="word" y="0" font-size="94" letter-spacing="10"><tspan font-weight="650">PANORAMA</tspan><tspan font-weight="300" dx="22">TV</tspan></text>
+  </g>
+  <g id="mark">
+    <rect id="solid" mask="url(#cut)" />
+    <rect id="outlineRect" fill="none" pathLength="1" stroke-linecap="round" />
+    <path id="outlineTri" fill="none" pathLength="1" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>
+<script>
+  const W = 1920, H = 1080, CX = W / 2, CY = H / 2;
+  const MW = 196, MH = 136, MR = 38;      // the mark: a rounded "screen"
+  const GAP = 44;
+  const $ = (id) => document.getElementById(id);
+  const word = $("word");
+  const textW = word.getBBox().width;
+  const textBox = word.getBBox();
+  const groupW = MW + GAP + textW;
+  const markX0 = CX - groupW / 2;           // mark position while the wordmark shows
+  const markXC = CX - MW / 2;               // centered position
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const seg = (t, a, b) => clamp((t - a) / (b - a));
+  const inOut = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+  const out = (p) => 1 - Math.pow(1 - p, 3);
+  const lerp = (a, b, p) => a + (b - a) * p;
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const mix = (a, b, p) => { const x = hex(a), y = hex(b); return `rgb(${x.map((v, i) => Math.round(lerp(v, y[i], p))).join(",")})`; };
+
+  // Colour keys for the flash.
+  const KEYS = [[2.40, "#ffffff"], [2.55, "#ffd2dc"], [2.74, "#ff2d55"], [2.90, "#8a0f2f"]];
+  function fillAt(t) {
+    if (t <= KEYS[0][0]) return KEYS[0][1];
+    for (let i = 1; i < KEYS.length; i++) {
+      if (t <= KEYS[i][0]) return mix(KEYS[i - 1][1], KEYS[i][1], seg(t, KEYS[i - 1][0], KEYS[i][0]));
+    }
+    return KEYS[KEYS.length - 1][1];
+  }
+
+  function trianglePath(x, y) {
+    // Optically centered play triangle inside the mark.
+    const cx = x + MW / 2 + 6, cy = y + MH / 2, s = 30;
+    return `M ${cx - s * 0.62} ${cy - s} L ${cx + s * 0.95} ${cy} L ${cx - s * 0.62} ${cy + s} Z`;
+  }
+
+  window.render = function (t) {
+    // 1. Retract: the mark glides to center while the wordmark slides into it.
+    const r = inOut(seg(t, 1.70, 2.15));
+    const mx = lerp(markX0, markXC, r);
+    const my = CY - MH / 2;
+    const textLeft = mx + MW + GAP - r * (textW + GAP + MW / 2 + 10);
+    word.setAttribute("x", textLeft);
+    word.setAttribute("y", CY - (textBox.y + textBox.height / 2));
+    // Text vanishes at the mark's right edge, so it never shows through the
+    // triangle cut-out as it slides underneath.
+    const clipX = mx + MW - 3;
+    $("clipRect").setAttribute("x", clipX);
+    $("clipRect").setAttribute("width", W - clipX);
+
+    // 2. The mark: solid with a cut-out triangle, scaled gently as it outlines.
+    const grow = 1 + 0.05 * out(seg(t, 2.85, 4.25));
+    $("mark").setAttribute("transform", `translate(${mx + MW / 2} ${CY}) scale(${grow}) translate(${-(mx + MW / 2)} ${-CY})`);
+    for (const id of ["solid", "cutRect", "outlineRect"]) {
+      const el = $(id);
+      el.setAttribute("x", mx); el.setAttribute("y", my);
+      el.setAttribute("width", MW); el.setAttribute("height", MH);
+      el.setAttribute("rx", MR);
+    }
+    $("cutTri").setAttribute("d", trianglePath(mx, my));
+    $("outlineTri").setAttribute("d", trianglePath(mx, my));
+
+    const solid = $("solid");
+    solid.setAttribute("fill", fillAt(t));
+    solid.setAttribute("opacity", 1 - seg(t, 2.86, 3.02));
+
+    // 3. Outline phase: thin strokes that unwind (erase) while fading.
+    const show = seg(t, 2.86, 2.98);
+    const fade = 1 - out(seg(t, 3.55, 4.25));
+    const erase = inOut(seg(t, 3.05, 4.2));
+    const stroke = mix("#ff4d6d", "#b0123f", seg(t, 3.0, 4.0));
+    for (const [id, lag] of [["outlineRect", 0], ["outlineTri", 0.12]]) {
+      const el = $(id);
+      const e = clamp(erase * (1 + lag) - lag);
+      el.setAttribute("stroke", stroke);
+      el.setAttribute("stroke-width", id === "outlineRect" ? 5 : 4.5);
+      el.setAttribute("stroke-dasharray", "1 1");
+      el.setAttribute("stroke-dashoffset", -e);   // the visible run shrinks as it unwinds
+      el.setAttribute("opacity", show * fade);
+    }
+  };
+
+  // ---- soundtrack -------------------------------------------------------------
+  window.renderAudio = async function () {
+    const SR = 48000, DUR = 5.7;
+    const ac = new OfflineAudioContext(2, Math.ceil(SR * DUR), SR);
+    const bus = ac.createDynamicsCompressor();
+    bus.threshold.value = -14; bus.ratio.value = 3;
+    const master = ac.createGain(); master.gain.value = 0.9;
+    bus.connect(master).connect(ac.destination);
+    const verb = makeReverb(ac, 2.6); verb.connect(bus);
+    const send = (node, amt) => { const g = ac.createGain(); g.gain.value = amt; node.connect(g).connect(verb); };
+
+    // Pad: detuned saws through an opening low-pass, swelling to the peak (≈2.0–3.8 s)
+    // and releasing into the black tail, mirroring the picture.
+    const padOut = ac.createGain();
+    padOut.gain.setValueAtTime(0.0001, 0);
+    padOut.gain.exponentialRampToValueAtTime(0.16, 1.9);
+    padOut.gain.setValueAtTime(0.16, 3.7);
+    padOut.gain.exponentialRampToValueAtTime(0.0001, 5.5);
+    const lp = ac.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 0.7;
+    lp.frequency.setValueAtTime(300, 0);
+    lp.frequency.exponentialRampToValueAtTime(2600, 2.6);
+    lp.frequency.exponentialRampToValueAtTime(900, 5.0);
+    lp.connect(padOut); padOut.connect(bus); send(padOut, 0.5);
+    [146.83, 220.0, 293.66, 369.99, 440.0].forEach((f, i) => {   // D major add9 voicing
+      for (const det of [-7, 7]) {
+        const o = ac.createOscillator(); o.type = "sawtooth"; o.frequency.value = f; o.detune.value = det + i;
+        const pan = ac.createStereoPanner(); pan.pan.value = (det < 0 ? -0.35 : 0.35) * (i % 2 ? 1 : 0.6);
+        const g = ac.createGain(); g.gain.value = 0.12;
+        o.connect(g).connect(pan).connect(lp); o.start(0); o.stop(DUR);
+      }
+    });
+    // Sub swell under the flash.
+    const sub = ac.createOscillator(); sub.frequency.value = 73.42;
+    const subG = ac.createGain();
+    subG.gain.setValueAtTime(0.0001, 0); subG.gain.exponentialRampToValueAtTime(0.22, 2.6);
+    subG.gain.exponentialRampToValueAtTime(0.0001, 4.8);
+    sub.connect(subG).connect(bus); sub.start(0); sub.stop(DUR);
+
+    // Whoosh as the wordmark retracts (1.7–2.15 s).
+    noiseSweep(ac, bus, send, { at: 1.55, dur: 0.75, from: 500, to: 5200, gain: 0.32 });
+
+    // Bell at the flash (2.5 s): inharmonic partials, long tail into the reverb.
+    [[1174.66, 0.16], [1174.66 * 2.76, 0.06], [1174.66 * 5.4, 0.025], [587.33, 0.12]].forEach(([f, g]) => {
+      bell(ac, bus, send, { at: 2.48, f, gain: g, decay: 2.4 });
+    });
+    // Sparkles as the outline unwinds.
+    [1760, 2349.32, 2637.02, 3520].forEach((f, i) => bell(ac, bus, send, { at: 3.0 + i * 0.16, f, gain: 0.035, decay: 1.2 }));
+
+    const buf = await ac.startRendering();
+    return wavBase64(buf);
+  };
+
+  function bell(ac, out, send, o) {
+    const osc = ac.createOscillator(); osc.frequency.value = o.f;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, o.at);
+    g.gain.exponentialRampToValueAtTime(o.gain, o.at + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, o.at + o.decay);
+    osc.connect(g); g.connect(out); send(g, 0.8);
+    osc.start(o.at); osc.stop(o.at + o.decay + 0.05);
+  }
+
+  function noiseSweep(ac, out, send, o) {
+    const len = Math.ceil(o.dur * ac.sampleRate);
+    const b = ac.createBuffer(2, len, ac.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1; }
+    const src = ac.createBufferSource(); src.buffer = b;
+    const bp = ac.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 1.1;
+    bp.frequency.setValueAtTime(o.from, o.at); bp.frequency.exponentialRampToValueAtTime(o.to, o.at + o.dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, o.at);
+    g.gain.exponentialRampToValueAtTime(o.gain, o.at + o.dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, o.at + o.dur);
+    src.connect(bp).connect(g); g.connect(out); send(g, 0.6);
+    src.start(o.at);
+  }
+
+  function makeReverb(ac, seconds) {
+    const len = Math.ceil(seconds * ac.sampleRate);
+    const ir = ac.createBuffer(2, len, ac.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    }
+    const conv = ac.createConvolver(); conv.buffer = ir;
+    const g = ac.createGain(); g.gain.value = 0.35;
+    conv.connect(g);
+    // Expose the convolver input but route its output through the gain.
+    const input = ac.createGain(); input.connect(conv);
+    input.connect = (dest) => g.connect(dest);
+    return input;
+  }
+
+  function wavBase64(buf) {
+    const ch = buf.numberOfChannels, n = buf.length, sr = buf.sampleRate;
+    const bytes = new DataView(new ArrayBuffer(44 + n * ch * 2));
+    const str = (o, s) => [...s].forEach((c, i) => bytes.setUint8(o + i, c.charCodeAt(0)));
+    str(0, "RIFF"); bytes.setUint32(4, 36 + n * ch * 2, true); str(8, "WAVE"); str(12, "fmt ");
+    bytes.setUint32(16, 16, true); bytes.setUint16(20, 1, true); bytes.setUint16(22, ch, true);
+    bytes.setUint32(24, sr, true); bytes.setUint32(28, sr * ch * 2, true); bytes.setUint16(32, ch * 2, true);
+    bytes.setUint16(34, 16, true); str(36, "data"); bytes.setUint32(40, n * ch * 2, true);
+    const data = [...Array(ch).keys()].map((c) => buf.getChannelData(c));
+    let o = 44;
+    for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) bytes.setInt16(o, Math.max(-1, Math.min(1, data[c][i])) * 0x7fff, true);
+    let bin = ""; const u8 = new Uint8Array(bytes.buffer);
+    for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
+  render(0);
+</script>
+</body>
+</html>

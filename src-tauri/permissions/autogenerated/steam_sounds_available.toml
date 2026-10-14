@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-steam-sounds-available"
+description = "Enables the steam_sounds_available command without any pre-configured scope."
+commands.allow = ["steam_sounds_available"]
+
+[[permission]]
+identifier = "deny-steam-sounds-available"
+description = "Denies the steam_sounds_available command without any pre-configured scope."
+commands.deny = ["steam_sounds_available"]

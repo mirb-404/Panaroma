@@ -10,6 +10,10 @@ fn main() {
             "oauth_sign_in",
             "oauth_refresh",
             "oauth_sign_out",
+            "steam_sounds_available",
+            "read_steam_sound",
+            "import_startup_video",
+            "clear_startup_video",
         ]),
     ))
     .expect("failed to run tauri-build");

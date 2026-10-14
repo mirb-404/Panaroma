@@ -2,15 +2,73 @@
 // wipes in beside it, then the whole card lifts away into the app. It is an
 // overlay, so the app loads underneath, and any button press skips it.
 import { h } from "../dom";
+import { fileSrc, isTauri } from "../platform";
 import { router } from "../router";
 import { settings } from "../settings";
+import { cueWhenReady } from "../sound";
 
 const POP = "cubic-bezier(.2, 1.45, .35, 1)";
 const GLIDE = "cubic-bezier(.75, 0, .2, 1)";
 const OUT = "cubic-bezier(.4, 0, .2, 1)";
 
-export function playIntro(): Promise<void> {
-  if (!settings().introAnimation || settings().reducedMotion) return Promise.resolve();
+/**
+ * Plays whatever the user chose to see at launch. `preview` (from Settings)
+ * plays it even when startup is set to Off.
+ */
+export async function playStartup(preview = false): Promise<void> {
+  const mode = settings().startup;
+  if (mode === "off" && !preview) return;
+  if (mode === "video" && settings().startupVideo && isTauri) {
+    const src = `${await fileSrc(settings().startupVideo)}?v=${settings().startupVideoVersion}`;
+    if (await playVideo(src)) return;
+  }
+  // The bundled Panorama startup movie (tools/startup-video renders it).
+  if (await playVideo(DEFAULT_MOVIE)) return;
+  // Last resort if video can't play at all: the code-drawn ident.
+  if (settings().reducedMotion && !preview) return;
+  return playIdent();
+}
+
+const DEFAULT_MOVIE = "/startup/panorama-startup.webm";
+
+/** Full-screen startup video. Resolves true once it played (or was skipped). */
+async function playVideo(src: string): Promise<boolean> {
+  const video = h("video.intro-video", { playsinline: true, preload: "auto" });
+  const el = h("div.intro.intro-videohost", null, video, h("div.intro-skip", null, "Press any button to skip"));
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (played: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(stall);
+      const out = el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: played ? 450 : 0, easing: OUT, fill: "forwards" });
+      // Fade the soundtrack with the picture.
+      const v0 = video.volume;
+      const fade = setInterval(() => (video.volume = Math.max(0, video.volume - v0 / 9)), 50);
+      out.onfinish = () => {
+        clearInterval(fade);
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+        router.closeOverlay();
+        resolve(played);
+      };
+    };
+    // Unplayable file (codec, missing): fall back to the ident quickly.
+    const stall = setTimeout(() => video.readyState < 2 && finish(false), 3000);
+    video.addEventListener("ended", () => finish(true));
+    video.addEventListener("error", () => finish(false));
+    video.addEventListener("playing", () => clearTimeout(stall), { once: true });
+
+    router.openOverlay({ el, onAction: () => (finish(true), true) }, { silent: true });
+    el.addEventListener("click", () => finish(true));
+    video.src = src;
+    video.play().catch(() => finish(false));
+  });
+}
+
+function playIdent(): Promise<void> {
 
   const mark = h("div.intro-mark", null, h("div.intro-glow"), h("div.logo-mark.intro-logo"));
   const word = h("div.intro-word", null, h("span", null, "Panorama"), h("span.intro-tv", null, "TV"));
@@ -37,11 +95,9 @@ export function playIntro(): Promise<void> {
       };
     };
 
-    router.openOverlay({
-      el,
-      onAction: () => (finish(), true),
-    });
+    router.openOverlay({ el, onAction: () => (finish(), true) }, { silent: true });
     el.addEventListener("click", finish);
+    cueWhenReady("startup");
 
     // Layout is known now: the glide distance centers [mark + gap + wordmark].
     requestAnimationFrame(() => {

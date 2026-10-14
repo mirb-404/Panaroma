@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-steam-sound"
+description = "Enables the read_steam_sound command without any pre-configured scope."
+commands.allow = ["read_steam_sound"]
+
+[[permission]]
+identifier = "deny-read-steam-sound"
+description = "Denies the read_steam_sound command without any pre-configured scope."
+commands.deny = ["read_steam_sound"]

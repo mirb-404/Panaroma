@@ -3,6 +3,7 @@ import { h, icon } from "../dom";
 import type { ActionEvent } from "../input";
 import { router, TABS, type TabId } from "../router";
 import { settings } from "../settings";
+import { cue } from "../sound";
 
 // ---- backdrop ------------------------------------------------------------------
 // Two stacked layers; the incoming image is fully decoded off-thread before it
@@ -136,7 +137,8 @@ export function createRail() {
 
 export const toastHost = h("div.toasts");
 
-export function toast(text: string, kind: "info" | "error" = "info", ms = 3200) {
+export function toast(text: string, kind: "info" | "error" | "success" = "info", ms = 3200) {
+  cue(kind === "error" ? "error" : kind === "success" ? "success" : "toast");
   const t = h(`div.toast.${kind}`, null, text);
   toastHost.append(t);
   setTimeout(() => {

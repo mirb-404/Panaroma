@@ -2,11 +2,13 @@ import { onAuth, oauthConfigured, signedIn, signOut } from "../auth";
 import { cacheClear } from "../cache";
 import { h, icon } from "../dom";
 import type { ActionEvent } from "../input";
-import { isTauri, openExternal, quitApp, setFullscreen } from "../platform";
+import { invoke, isTauri, openExternal, pickVideoFile, quitApp, setFullscreen } from "../platform";
 import { edgeBump, router, TABS, type Screen } from "../router";
-import { effectiveApiKey, onSettings, quotaDay, settings, updateSettings } from "../settings";
+import { onSettings, quotaDay, settings, updateSettings, type Settings } from "../settings";
+import { cue, loadSounds, setSoundVolume } from "../sound";
+import { playStartup } from "../ui/intro";
 import { applyScale, setBackdrop, toast } from "../ui/chrome";
-import { CREDENTIALS_URL, openOAuthSetup, YT_API_URL } from "../ui/oauthsetup";
+import { CREATE_CLIENT_URL, openOAuthSetup, YT_API_URL } from "../ui/oauthsetup";
 import { confirmDialog, openTextEntry } from "../ui/textentry";
 import { signInFlow } from "./common";
 
@@ -33,6 +35,39 @@ function cycle<T>(list: T[], cur: T, dir: number): T {
   return list[(i + dir + list.length) % list.length] ?? list[0];
 }
 
+const SOUND_PACKS: Settings["uiSounds"][] = ["steam", "panorama", "off"];
+const SOUND_LABEL: Record<Settings["uiSounds"], string> = { steam: "Steam Big Picture", panorama: "Panorama", off: "Off" };
+const STARTUP_MODES: Settings["startup"][] = ["default", "video", "off"];
+const STARTUP_LABEL: Record<Settings["startup"], string> = { default: "Panorama", video: "Your video", off: "Off" };
+
+type BoolKey = "startFullscreen" | "reducedMotion" | "autoplayNext";
+function toggle(key: BoolKey) {
+  const on = !settings()[key];
+  updateSettings({ [key]: on } as Partial<Settings>);
+  cue(on ? "toggleOn" : "toggleOff");
+}
+
+async function setSounds(pack: Settings["uiSounds"]) {
+  updateSettings({ uiSounds: pack });
+  const got = await loadSounds();
+  if (pack === "steam" && got !== "steam") toast("Steam isn't installed — using Panorama's sounds");
+  cue("select");
+}
+
+async function chooseStartupVideo() {
+  if (!isTauri) return toast("Startup videos need the desktop app", "error");
+  const path = await pickVideoFile();
+  if (!path) return;
+  try {
+    const stored = await invoke<string>("import_startup_video", { path });
+    updateSettings({ startupVideo: stored, startup: "video", startupVideoVersion: Date.now() });
+    cue("success");
+    playStartup(true);
+  } catch (e) {
+    toast(String(e), "error", 5000);
+  }
+}
+
 /** Rebuild content tabs (keys/region changed), leaving this screen in place. */
 function refreshContent() {
   for (const t of TABS) if (t !== "settings") router.resetTab(t);
@@ -48,7 +83,7 @@ export function settingsScreen(): Screen {
       help: "Panorama doesn't ship with Google credentials — you create your own free OAuth client in about 3 minutes: enable the YouTube Data API v3, then Credentials → Create credentials → OAuth client ID → Desktop app → Create, and paste the Client ID and Client secret here. Select this row for a step-by-step guide.",
       links: [
         { label: "Open YouTube Data API v3 page", url: YT_API_URL },
-        { label: "Open Credentials page", url: CREDENTIALS_URL },
+        { label: "Create OAuth client", url: CREATE_CLIENT_URL },
       ],
       select: () => openOAuthSetup(),
     },
@@ -56,7 +91,7 @@ export function settingsScreen(): Screen {
       label: "OAuth Client ID",
       value: () => (settings().clientId ? mask(settings().clientId) : "Not set"),
       help: "From Google Cloud Console → Credentials → your Desktop app OAuth client. It ends with .apps.googleusercontent.com. Paste it here (Ctrl+V or the Paste key).",
-      links: [{ label: "Open Credentials page", url: CREDENTIALS_URL }],
+      links: [{ label: "Create OAuth client", url: CREATE_CLIENT_URL }],
       select: () =>
         openTextEntry({
           title: "OAuth Client ID",
@@ -69,7 +104,7 @@ export function settingsScreen(): Screen {
       label: "OAuth Client secret",
       value: () => mask(settings().clientSecret),
       help: "Shown next to the Client ID in Google Cloud Console (usually starts with GOCSPX-). Desktop-app secrets aren't treated as confidential by Google; sign-in also uses PKCE, and your sign-in is stored in Windows Credential Manager.",
-      links: [{ label: "Open Credentials page", url: CREDENTIALS_URL }],
+      links: [{ label: "Create OAuth client", url: CREATE_CLIENT_URL }],
       select: () =>
         openTextEntry({
           title: "OAuth Client secret",
@@ -118,7 +153,7 @@ export function settingsScreen(): Screen {
       value: () => onOff(settings().startFullscreen),
       help: "Launch straight into fullscreen. Toggle fullscreen anytime with F11 or by clicking the right stick.",
       select: () => {
-        updateSettings({ startFullscreen: !settings().startFullscreen });
+        toggle("startFullscreen");
         setFullscreen(settings().startFullscreen);
       },
     },
@@ -127,21 +162,52 @@ export function settingsScreen(): Screen {
       value: () => (settings().reducedMotion ? "Reduced" : "Full"),
       help: "Reduced motion replaces slides and springs with instant changes.",
       select: () => {
-        updateSettings({ reducedMotion: !settings().reducedMotion });
+        toggle("reducedMotion");
         applyScale();
       },
-    },
-    {
-      label: "Startup animation",
-      value: () => onOff(settings().introAnimation),
-      help: "Play the Panorama ident when the app opens. Any button skips it.",
-      select: () => updateSettings({ introAnimation: !settings().introAnimation }),
     },
     {
       label: "Autoplay next video",
       value: () => onOff(settings().autoplayNext),
       help: "When a video ends, play the next one from the row you started in after a short countdown.",
-      select: () => updateSettings({ autoplayNext: !settings().autoplayNext }),
+      select: () => toggle("autoplayNext"),
+    },
+    {
+      section: "Sound & startup",
+      label: "UI sounds",
+      value: () => SOUND_LABEL[settings().uiSounds],
+      help: "Steam Big Picture uses the sounds from your own Steam installation (nothing is bundled with Panorama); if Steam isn't installed, Panorama's built-in sounds play instead. Use ◀ ▶ to change.",
+      adjust: (d) => setSounds(cycle(SOUND_PACKS, settings().uiSounds, d)),
+    },
+    {
+      label: "UI sound volume",
+      value: () => `${Math.round(settings().uiVolume * 100)}%`,
+      help: "Volume of navigation and menu sounds. Doesn't affect video playback. Use ◀ ▶ to change.",
+      adjust: (d) => {
+        const v = Math.round(Math.min(1, Math.max(0, settings().uiVolume + d * 0.1)) * 10) / 10;
+        updateSettings({ uiVolume: v });
+        setSoundVolume(v);
+      },
+    },
+    {
+      label: "Startup",
+      value: () => STARTUP_LABEL[settings().startup],
+      help: "What plays when Panorama opens: the Panorama startup movie, your own video, or nothing. Any button skips it. Use ◀ ▶ to change.",
+      adjust: (d) => {
+        const options = settings().startupVideo ? STARTUP_MODES : STARTUP_MODES.filter((m) => m !== "video");
+        updateSettings({ startup: cycle(options, settings().startup, d) });
+      },
+    },
+    {
+      label: "Startup video",
+      value: () => (settings().startupVideo ? settings().startupVideo.split(/[\\/]/).pop()! : "None — select to choose"),
+      help: "Use your own video as the startup intro, like Steam Big Picture. MP4 (H.264), WebM or MOV work best. Panorama keeps its own copy, so you can move or delete the original.",
+      select: () => chooseStartupVideo(),
+    },
+    {
+      label: "Preview startup",
+      help: "Play the current startup intro now.",
+      select: () => playStartup(true),
     },
     {
       section: "Data",
@@ -166,24 +232,6 @@ export function settingsScreen(): Screen {
         router.resetTab("search");
         toast("Search history cleared");
       },
-    },
-    {
-      section: "Advanced",
-      label: "YouTube API key (optional)",
-      value: () => (settings().apiKey ? mask(settings().apiKey) : effectiveApiKey() ? "From .env.local (dev)" : "Not set"),
-      help: "Not needed when you're signed in. Only lets Trending and search work while signed out. Create one in Google Cloud Console for the YouTube Data API v3 and paste it here (Ctrl+V works).",
-      select: () =>
-        openTextEntry({
-          title: "YouTube API key",
-          hint: "Paste your YouTube Data API v3 key",
-          value: settings().apiKey,
-          secret: true,
-          onSubmit: (v) => {
-            updateSettings({ apiKey: v });
-            refreshContent();
-            toast(v ? "API key saved" : "API key cleared");
-          },
-        }),
     },
     {
       section: "About",
@@ -274,13 +322,16 @@ export function settingsScreen(): Screen {
         case "left":
           if (!r.adjust) return false;
           r.adjust(-1);
+          cue("sliderDown");
           break;
         case "right":
           if (!r.adjust) return e.repeat || (edgeBump(), true);
           r.adjust(1);
+          cue("sliderUp");
           break;
         case "select":
-          r.select?.();
+          if (r.select) r.select();
+          else if (r.adjust) (r.adjust(1), cue("sliderUp"));
           break;
         default:
           return false;

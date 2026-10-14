@@ -1,4 +1,5 @@
 mod gamepad;
+mod media;
 mod oauth;
 
 use std::net::TcpListener;
@@ -67,6 +68,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build());
     if !dev {
         builder = builder.plugin(tauri_plugin_localhost::Builder::new(port).build());
@@ -127,6 +129,10 @@ pub fn run() {
             oauth::oauth_sign_in,
             oauth::oauth_refresh,
             oauth::oauth_sign_out,
+            media::steam_sounds_available,
+            media::read_steam_sound,
+            media::import_startup_video,
+            media::clear_startup_video,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

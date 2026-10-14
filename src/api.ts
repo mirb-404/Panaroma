@@ -2,7 +2,7 @@
 // renders, caches aggressively, and meters quota (10,000 units/day per key).
 import { accessToken } from "./auth";
 import { cacheGet, cachePut } from "./cache";
-import { addQuota, effectiveApiKey, settings } from "./settings";
+import { addQuota, settings } from "./settings";
 
 const BASE = "https://www.googleapis.com/youtube/v3/";
 const MIN = 60_000;
@@ -72,14 +72,11 @@ async function call<T>(path: string, params: Params, opts: { units: number; ttl:
   const hit = await cacheGet<T>(key, opts.ttl);
   if (hit) return hit;
 
-  // Signed in: every request (public or personal) is authorized by the user's
-  // Google token, so no API key is needed. A key is only an optional fallback
-  // for browsing while signed out.
-  const headers: Record<string, string> = {};
+  // Every request — public or personal — is authorized by the signed-in user's
+  // Google token; there is no API key.
   const token = await accessToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  else if (!opts.auth && effectiveApiKey()) qs.set("key", effectiveApiKey());
-  else throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
+  if (!token) throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
 
   let res: Response;
   try {
@@ -94,9 +91,7 @@ async function call<T>(path: string, params: Params, opts: { units: number; ttl:
     const msg =
       reason === "quotaExceeded"
         ? "Daily YouTube API quota reached — it resets at midnight Pacific"
-        : reason === "keyInvalid"
-          ? "The YouTube API key is invalid"
-          : (body?.error?.message ?? `YouTube API error ${res.status}`);
+        : (body?.error?.message ?? `YouTube API error ${res.status}`);
     throw new ApiError(msg, res.status, reason);
   }
   cachePut(key, body);

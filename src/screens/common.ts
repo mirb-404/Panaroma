@@ -8,12 +8,6 @@ import { openOAuthSetup } from "../ui/oauthsetup";
 export function errorPanel(err: unknown) {
   const reason = err instanceof ApiError ? err.reason : "";
   const msg = err instanceof Error ? err.message : String(err);
-  if (reason === "noKey")
-    return messagePanel(
-      "Connect to YouTube",
-      "Panorama uses the official YouTube Data API. Add an API key in Settings to start browsing.",
-      [{ label: "Open Settings", run: () => router.showTab("settings") }],
-    );
   if (reason === "signedOut")
     return oauthConfigured()
       ? messagePanel("Welcome to Panorama", "Sign in with your Google account to watch YouTube — your subscriptions, likes and playlists come along.", [
@@ -32,7 +26,7 @@ export async function signInFlow() {
   toast("Finish signing in in your browser…");
   try {
     await signIn();
-    toast("Signed in"); // the onAuth listener in main.ts rebuilds the tabs
+    toast("Signed in", "success"); // the onAuth listener in main.ts rebuilds the tabs
   } catch (e) {
     toast(`Sign-in failed: ${e}`, "error", 5000);
   }

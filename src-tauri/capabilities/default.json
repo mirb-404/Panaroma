@@ -23,6 +23,11 @@
     "allow-quit-app",
     "allow-oauth-sign-in",
     "allow-oauth-refresh",
-    "allow-oauth-sign-out"
+    "allow-oauth-sign-out",
+    "allow-steam-sounds-available",
+    "allow-read-steam-sound",
+    "allow-import-startup-video",
+    "allow-clear-startup-video",
+    "dialog:allow-open"
   ]
 }

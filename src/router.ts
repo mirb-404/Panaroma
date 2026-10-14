@@ -4,6 +4,21 @@
 import { h } from "./dom";
 import { rumble, setActionHandler, type ActionEvent } from "./input";
 import { settings } from "./settings";
+import { cue, type Cue } from "./sound";
+
+/** Baseline sound for an action a screen consumed; specific handlers may cue
+ *  something more important in the same tick (it wins). */
+function cueFor(e: ActionEvent) {
+  const c: Cue =
+    e.action === "up" || e.action === "down" || e.action === "left" || e.action === "right"
+      ? "move"
+      : e.action === "prevTab" || e.action === "nextTab"
+        ? "tab"
+        : e.action === "back"
+          ? "back"
+          : "select";
+  cue(c);
+}
 
 export interface Screen {
   el: HTMLElement;
@@ -59,15 +74,19 @@ class Router {
   private dispatch(e: ActionEvent) {
     const overlay = this.overlays[this.overlays.length - 1];
     if (overlay) {
-      if (!overlay.onAction(e) && e.action === "back") this.closeOverlay();
+      if (overlay.onAction(e)) cueFor(e);
+      else if (e.action === "back") this.closeOverlay();
       return;
     }
     if (this.onGlobal(e)) return;
     if (this.railFocused && !this.stack.length) {
-      this.rail.onAction(e);
+      if (this.rail.onAction(e)) cueFor(e);
       return;
     }
-    if (this.top?.onAction(e)) return;
+    if (this.top?.onAction(e)) {
+      cueFor(e);
+      return;
+    }
 
     switch (e.action) {
       case "back":
@@ -98,6 +117,7 @@ class Router {
 
   focusRail(on: boolean) {
     if (this.stack.length) on = false;
+    if (on !== this.railFocused) cue(on ? "railIn" : "railOut");
     this.railFocused = on;
     this.rail.setFocused(on);
     document.body.classList.toggle("rail-open", on);
@@ -116,6 +136,7 @@ class Router {
       prev.onHide?.();
       hide(prev.el);
     }
+    if (prev && prev !== next) cue("tab");
     this.tab = t;
     this.rail.setActive(t);
     show(next.el, "fade");
@@ -141,6 +162,7 @@ class Router {
     this.focusRail(false);
     const under = this.top;
     under?.onHide?.();
+    cue(s.immersive ? "launch" : "open");
     this.stack.push(s);
     this.stage.append(s.el);
     document.body.classList.toggle("immersive", !!s.immersive);
@@ -152,6 +174,7 @@ class Router {
   pop(instant = false) {
     const s = this.stack.pop();
     if (!s) return;
+    if (!instant) cue("back");
     s.onHide?.();
     s.onDestroy?.();
     if (instant || settings().reducedMotion) s.el.remove();
@@ -166,7 +189,11 @@ class Router {
     now.onShow?.();
   }
 
-  openOverlay(o: Overlay) {
+  private silent = new WeakSet<Overlay>();
+
+  openOverlay(o: Overlay, opts: { silent?: boolean } = {}) {
+    if (opts.silent) this.silent.add(o);
+    else cue("modalOpen");
     this.overlays.push(o);
     this.overlayHost.append(o.el);
     o.el.classList.add("overlay-in");
@@ -175,6 +202,7 @@ class Router {
   closeOverlay() {
     const o = this.overlays.pop();
     if (!o) return;
+    if (!this.silent.has(o)) cue("modalClose");
     o.onClose?.();
     o.el.classList.add("overlay-out");
     setTimeout(() => o.el.remove(), settings().reducedMotion ? 0 : 220);
@@ -204,6 +232,7 @@ function hide(el: HTMLElement, mode?: "behind") {
 
 export function edgeBump() {
   rumble(0.25, 25);
+  cue("bump");
   const el = document.querySelector<HTMLElement>(".focused");
   el?.animate([{ translate: "0 0" }, { translate: "4px 0" }, { translate: "-3px 0" }, { translate: "0 0" }], {
     duration: 180,

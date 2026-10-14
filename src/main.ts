@@ -10,12 +10,15 @@ import { settingsScreen } from "./screens/settings";
 import { homeScreen, libraryScreen, subscriptionsScreen } from "./screens/tabs";
 import { loadSettings, settings } from "./settings";
 import { applyScale, backdropEl, createClock, createRail, toast, toastHost } from "./ui/chrome";
-import { playIntro } from "./ui/intro";
+import { playStartup } from "./ui/intro";
+import { openOAuthSetup } from "./ui/oauthsetup";
+import { loadSounds } from "./sound";
 import { confirmDialog } from "./ui/textentry";
 
 async function main() {
   await loadSettings();
   applyScale();
+  loadSounds();
 
   const rail = createRail();
   const stage = h("main.stage");
@@ -44,8 +47,14 @@ async function main() {
 
   // The intro is the first frame the user sees; the app loads behind it.
   if (settings().startFullscreen) setFullscreen(true);
-  playIntro();
+  const startup = playStartup();
   requestAnimationFrame(() => requestAnimationFrame(appReady));
+
+  // First boot (or signed out): go straight to Google sign-in once the intro
+  // is done. Credentials and the session are remembered after that.
+  Promise.all([startup, restoreSession()]).then(() => {
+    if (!signedIn()) openOAuthSetup();
+  });
 
   // Don't let a slow token refresh hold the first paint hostage.
   await Promise.race([restoreSession(), new Promise((r) => setTimeout(r, 2500))]);

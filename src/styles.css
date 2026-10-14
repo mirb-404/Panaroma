@@ -1447,3 +1447,30 @@ body.rail-open .stage {
   width: 1.2rem;
   height: 1.2rem;
 }
+
+.intro-videohost {
+  background: #000;
+}
+
+.intro-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.intro-skip {
+  position: absolute;
+  right: var(--gutter);
+  bottom: 2.4rem;
+  padding: 0.5rem 1rem;
+  border-radius: 99rem;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  opacity: 0;
+  animation: fade-in 0.5s 1.2s var(--ease) forwards;
+}

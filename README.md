@@ -33,6 +33,26 @@ their own 10,000-unit daily quota.
 For development, `.env.local` (see `.env.example`) can prefill the client. Those values
 are compiled out of release builds.
 
+## Sounds & startup
+
+- **UI sounds** (Settings → Sound & startup): *Steam Big Picture* plays the
+  sounds from the user's own Steam installation. Steam is found through the
+  registry, and its files are read at runtime from `steamui\sounds`. Panorama
+  never bundles or redistributes them. *Panorama* is a built-in pack synthesized
+  with WebAudio, so it needs no audio files; it is also used automatically when
+  Steam isn't installed. *Off* disables UI sounds. Volume is adjustable.
+- **Startup**: the Panorama startup movie (`public/startup/panorama-startup.webm`,
+  rendered from `tools/startup-video/scene.html` with `node tools/startup-video/render.mjs`,
+  which needs Edge and ffmpeg), **your own video** (MP4/WebM/MOV, picked with a
+  file dialog and copied into app data, like Big Picture's startup movies), or
+  nothing. Any button skips it, and *Preview startup* replays it.
+
+## Installer
+
+`pnpm tauri build` produces a standard MSI: **Welcome → choose install folder →
+Install → Finish** (with an optional "Launch Panorama" box). No license page and no
+extras.
+
 ## Controls
 
 | Xbox controller | Keyboard | Browse | Player |
