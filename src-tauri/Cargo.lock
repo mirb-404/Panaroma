@@ -2619,7 +2619,7 @@ dependencies = [
 
 [[package]]
 name = "panorama"
-version = "0.2.0"
+version = "3.0.0"
 dependencies = [
  "gilrs",
  "reqwest 0.12.28",

@@ -117,7 +117,7 @@ if Panorama doesn't respond.
 | B | Esc / Backspace | Back; from the rail, exit | Back |
 | Y | `/` | Search | Toggle layout (split ↔ theater) |
 | X | – | – | Mute; after an error, open on YouTube |
-| ☰ Start / Options | – | **Settings** (press again to go back) | Up Next list |
+| ☰ Start / Options | – | **Settings** (press again to go back) | **Playback settings**: captions, speed, quality, ultrawide fill, layout, Up next |
 | ⧉ View | `i` | – | Go to channel |
 | LB / RB | `[` `]` | Previous / next tab | Previous (or restart) / next video |
 | LT / RT | `,` `.` | – | Seek ±30 s |

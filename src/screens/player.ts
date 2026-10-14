@@ -7,9 +7,9 @@ import { decodeEntities, fmtDuration, h } from "../dom";
 import type { ActionEvent } from "../input";
 import { flip } from "../motion";
 import { isTauri, listen, openYouTube } from "../platform";
-import type { Screen } from "../router";
+import { router, type Screen } from "../router";
 import { openChannel } from "../routes";
-import { settings } from "../settings";
+import { settings, updateSettings } from "../settings";
 import { cue } from "../sound";
 import { setBackdrop, toast } from "../ui/chrome";
 
@@ -87,6 +87,12 @@ class AdoptedPlayer {
   mute() { this.info.muted = true; this.cmd("mute"); }
   unMute() { this.info.muted = false; this.cmd("unMute"); }
   loadVideoById(id: string) { this.info.currentTime = 0; this.cmd("loadVideoById", [id, 0]); }
+  getPlaybackRate(): number { return this.info.playbackRate ?? 1; }
+  setPlaybackRate(r: number) { this.info.playbackRate = r; this.cmd("setPlaybackRate", [r]); }
+  getPlaybackQuality(): string { return this.info.playbackQuality ?? ""; }
+  loadModule(m: string) { this.cmd("loadModule", [m]); }
+  setOption(m: string, k: string, v: unknown) { this.cmd("setOption", [m, k, v]); }
+  unloadModule(m: string) { this.cmd("unloadModule", [m]); }
   setSize(w: number, h: number) { this.frame.width = String(w); this.frame.height = String(h); }
   destroy() { window.removeEventListener("message", this.onMessage); this.frame.remove(); }
 }
@@ -163,7 +169,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   const legend = h(
     "div.legend",
     null,
-    "Ⓐ play/pause   ◀ ▶ seek   ▲ ▼ volume   LB/RB prev/next   Ⓨ layout   ☰ up next   ⧉ channel   Ⓑ back",
+    "Ⓐ play/pause   ◀ ▶ seek   ▲ ▼ volume   LB/RB prev/next   Ⓨ layout   ☰ settings   ⧉ channel   Ⓑ back",
   );
   const panel = h(
     "aside.np-panel",
@@ -268,6 +274,133 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       const top = target.offsetTop - queueEl.clientHeight * 0.35;
       queueEl.scrollTo({ top, behavior: settings().reducedMotion ? "auto" : "smooth" });
     }
+  }
+
+  // ---- playback settings (☰) ------------------------------------------------------
+  // YouTube's own gear menu needs a mouse; this is the controller version.
+  let captionsOn = false;
+  const RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  const QUALITY: Record<string, string> = {
+    highres: "Above 4K", hd2160: "2160p (4K)", hd1440: "1440p", hd1080: "1080p", hd720: "720p",
+    large: "480p", medium: "360p", small: "240p", tiny: "144p",
+  };
+
+  function openPlaybackSettings() {
+    let idx = 0;
+    const rate = () => player?.getPlaybackRate?.() ?? 1;
+    const rows: { label: string; value?: () => string; help: string; select?: () => void; adjust?: (d: 1 | -1) => void }[] = [
+      {
+        label: "Captions",
+        value: () => (captionsOn ? "On" : "Off"),
+        help: "Subtitles in the video's language, or YouTube's automatic captions.",
+        select: () => {
+          captionsOn = !captionsOn;
+          if (captionsOn) {
+            // Loading the module alone doesn't always pick a track: choose the
+            // viewer's language (YouTube falls back to auto-captions).
+            player?.loadModule?.("captions");
+            const lang = (navigator.language || "en").split("-")[0];
+            setTimeout(() => player?.setOption?.("captions", "track", { languageCode: lang }), 700);
+          } else player?.unloadModule?.("captions");
+          cue(captionsOn ? "toggleOn" : "toggleOff");
+        },
+      },
+      {
+        label: "Speed",
+        value: () => (rate() === 1 ? "Normal" : `${rate()}×`),
+        help: "Playback speed. Use ◀ ▶ to change.",
+        adjust: (d) => {
+          const i = Math.max(0, Math.min(RATES.length - 1, RATES.indexOf(rate()) + d));
+          player?.setPlaybackRate?.(RATES[i < 0 ? 3 : i]);
+        },
+      },
+      {
+        label: "Quality",
+        value: () => `Auto${QUALITY[player?.getPlaybackQuality?.() ?? ""] ? ` · ${QUALITY[player.getPlaybackQuality()]}` : ""}`,
+        help: "YouTube picks the quality for embedded players automatically (bigger players get higher quality). Select to open this video on YouTube, where you can choose it.",
+        select: () => {
+          router.closeOverlay();
+          player?.pauseVideo?.();
+          openYouTube(`/watch?v=${current.id}`).catch(() => {});
+        },
+      },
+      {
+        label: "Fill ultrawide screens",
+        value: () => (settings().ultrawideFill ? "On" : "Off"),
+        help: "Zoom the video to fill an ultrawide screen (full layout).",
+        select: () => {
+          updateSettings({ ultrawideFill: !settings().ultrawideFill });
+          const from = videoBox.getBoundingClientRect();
+          sizeVideo();
+          flip(videoBox, from);
+          cue(settings().ultrawideFill ? "toggleOn" : "toggleOff");
+        },
+      },
+      {
+        label: "Layout",
+        value: () => (layout === "split" ? "Side panel" : "Full"),
+        help: "Show the info and Up next panel beside the video, or the video alone. Ⓨ also switches.",
+        select: () => setLayout(layout === "split" ? "theater" : "split"),
+        adjust: () => setLayout(layout === "split" ? "theater" : "split"),
+      },
+      {
+        label: "Up next",
+        help: "Browse what plays next.",
+        select: () => {
+          router.closeOverlay();
+          if (layout === "theater") setLayout("split");
+          setFocus("queue");
+        },
+      },
+      {
+        label: "Panorama settings",
+        help: "Sounds, startup, controller and app settings. Leaves this video.",
+        select: () => {
+          router.closeOverlay();
+          router.showTab("settings");
+        },
+      },
+    ];
+
+    const list = h("div.ps-list");
+    const help = h("p.ps-help");
+    const els = rows.map((r, i) => {
+      const el = h("div.s-row", { onclick: () => ((idx = i), r.select?.(), sync()) }, h("span.s-label", null, r.label), h("span.s-value"));
+      list.append(el);
+      return el;
+    });
+    const sync = () => {
+      els.forEach((el, i) => {
+        el.classList.toggle("focused", i === idx);
+        const v = rows[i].value?.() ?? "";
+        el.querySelector(".s-value")!.textContent = v && rows[i].adjust ? `◀  ${v}  ▶` : v;
+      });
+      help.textContent = rows[idx].help;
+    };
+    const el = h("div.overlay.playback-settings", null, h("div.ps-panel", null, h("h2", null, "Playback"), list, help, h("p.te-legend", null, "Ⓐ select   ◀ ▶ change   Ⓑ / ☰ close")));
+    sync();
+    // Values like quality and speed settle a moment after a change.
+    const refresh = window.setInterval(sync, 500);
+    router.openOverlay({
+      el,
+      onClose: () => clearInterval(refresh),
+      onAction(e: ActionEvent) {
+        const r = rows[idx];
+        if (e.action === "up") idx = Math.max(0, idx - 1);
+        else if (e.action === "down") idx = Math.min(rows.length - 1, idx + 1);
+        else if (e.action === "left" || e.action === "right") {
+          if (!r.adjust) return true;
+          r.adjust(e.action === "left" ? -1 : 1);
+          cue(e.action === "left" ? "sliderDown" : "sliderUp");
+        } else if (e.action === "select") (r.select ?? (() => r.adjust?.(1)))();
+        else if (e.action === "menu") {
+          router.closeOverlay();
+          return true;
+        } else return false;
+        sync();
+        return true;
+      },
+    });
   }
 
   function setFocus(f: "video" | "queue") {
@@ -555,8 +688,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
           setLayout(layout === "split" ? "theater" : "split");
           return true;
         case "menu":
-          if (layout === "theater") setLayout("split");
-          setFocus("queue");
+          openPlaybackSettings();
           return true;
         case "alt":
           if (errored) openWatchView(current.id);
