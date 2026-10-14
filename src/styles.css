@@ -1327,3 +1327,123 @@ body.rail-open .stage {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+/* ---- sign-in setup guide ------------------------------------------------------ */
+
+.setup-panel {
+  width: min(64rem, 92vw);
+}
+
+.setup-panel h2 {
+  font-size: 2.1rem;
+  font-weight: 700;
+}
+
+.setup-intro {
+  margin-top: 0.6rem;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
+.setup-steps {
+  margin: 1.6rem 0 1.4rem;
+  padding-left: 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  font-size: 1.12rem;
+  line-height: 1.45;
+}
+
+.setup-steps li::marker {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.setup-note {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.setup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.setup-links {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.setup-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 3.4rem;
+  padding: 0 1.4rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 1.08rem;
+  font-weight: 600;
+  text-align: left;
+  transition: transform 0.18s var(--ease), background-color 0.15s, color 0.15s;
+}
+
+.setup-btn.link {
+  flex: 1;
+  color: #8ab4ff;
+}
+
+.setup-btn.field {
+  justify-content: space-between;
+}
+
+.setup-value {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-btn.field.filled .setup-value {
+  color: #7ee2a8;
+}
+
+.setup-btn.primary {
+  justify-content: center;
+  background: rgba(255, 61, 72, 0.3);
+}
+
+.setup-btn.primary.disabled {
+  opacity: 0.45;
+}
+
+.setup-btn.focused {
+  background: var(--fg);
+  color: #000;
+  transform: scale(1.02);
+}
+
+.setup-btn.focused .setup-value {
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.help-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  color: #8ab4ff;
+  font-size: 1.05rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+.help-link .icon {
+  width: 1.2rem;
+  height: 1.2rem;
+}

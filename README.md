@@ -13,31 +13,25 @@ don't have WebView2 yet. Upgrades install over older versions (fixed WiX upgrade
 
 ## First run
 
-Users only need to pick **Sign in with Google**. Consent happens in their browser
-through a loopback redirect with PKCE, and the refresh token is stored in Windows
-Credential Manager. Every request then runs on the user's own Google token, so no API
-key is needed.
+Panorama ships **without** Google credentials. Each user connects their own free
+Google Cloud OAuth client once. On first launch the app shows **Set up sign-in**,
+which opens a guided setup:
 
-### One-time setup (publisher only)
+1. **Open YouTube Data API v3 page** (a button in the app) → **Enable**.
+   Google Cloud creates a project first if the user has none.
+2. **Credentials → Create credentials → OAuth client ID.** If Google asks to configure
+   the consent screen first: choose External, enter an app name and email, and add your
+   Gmail under *Test users*.
+3. **Application type: Desktop app → Create.**
+4. Copy the **Client ID** and **Client secret** and paste them into Panorama, then
+   choose **Sign in with Google**.
 
-Google only shows a sign-in screen for an app registered with it, so the build has to
-include an OAuth client ID:
+The same fields are in **Settings → Account**. The refresh token is stored in Windows
+Credential Manager. Because every user has their own project, every user also gets
+their own 10,000-unit daily quota.
 
-1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and
-   enable **YouTube Data API v3**.
-2. Under *Google Auth Platform*, configure the consent screen (External) and add the
-   scope `.../auth/youtube.readonly`.
-3. Under *Clients*, create a client of type **Desktop app**.
-4. Copy `.env.example` to `.env.local`, fill in `VITE_GOOGLE_CLIENT_ID` and
-   `VITE_GOOGLE_CLIENT_SECRET`, and run `pnpm tauri build`.
-
-Notes:
-- Until Google verifies the app, only accounts listed as *test users* (up to 100) can
-  sign in. Submit the app for verification before releasing it publicly.
-- All users share the project's quota of 10,000 units per day. Browsing costs about
-  1 unit per request and a search costs 100. Google raises the limit on request
-  (Quotas → YouTube Data API → apply for an audit).
-- `VITE_YT_API_KEY` is optional. It only enables browsing while signed out.
+For development, `.env.local` (see `.env.example`) can prefill the client. Those values
+are compiled out of release builds.
 
 ## Controls
 
