@@ -20,6 +20,10 @@ const YT = "https://www.youtube.com";
 let timer = 0;
 let stopTimer = 0;
 let revealTimer = 0;
+let handshake = 0;
+let giveUp = 0;
+/** No playback by then (embed blocked, ad wall, slow network): drop it. */
+const START_TIMEOUT_MS = 12_000;
 let active: { host: HTMLElement; frame: HTMLIFrameElement; id: string; hero: boolean } | null = null;
 /** Where the last preview got to, so the player can pick up from there. */
 let progress: { id: string; t: number } | null = null;
@@ -46,6 +50,9 @@ export function cancelPreview() {
   clearTimeout(timer);
   clearTimeout(stopTimer);
   clearTimeout(revealTimer);
+  revealTimer = 0;
+  clearInterval(handshake);
+  clearTimeout(giveUp);
   const a = active;
   active = null;
   if (!a) return;
@@ -65,6 +72,9 @@ export function takePreview(videoId: string): HTMLIFrameElement | null {
   clearTimeout(timer);
   clearTimeout(stopTimer);
   clearTimeout(revealTimer);
+  revealTimer = 0;
+  clearInterval(handshake);
+  clearTimeout(giveUp);
   active = null;
   a.host.classList.remove("previewing");
   return a.frame;
@@ -97,17 +107,27 @@ function start(host: HTMLElement, id: string, hero: boolean) {
     tabindex: "-1",
     title: "",
   });
-  // Subscribe to the player's state and time over postMessage once loaded.
-  frame.addEventListener("load", () =>
-    frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), YT),
-  );
+  // Subscribe to the player's state and time. Like YouTube's own API library,
+  // keep announcing until the player answers: a single message sent at "load"
+  // can arrive before the player is listening, and then the preview would
+  // never learn it's playing (and never show).
+  const announce = () =>
+    frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), YT);
+  frame.addEventListener("load", announce);
   host.append(frame);
   active = { host, frame, id, hero };
+  answered = false;
+  clearInterval(handshake);
+  handshake = window.setInterval(() => (answered ? clearInterval(handshake) : announce()), 250);
+  giveUp = window.setTimeout(() => active?.frame === frame && !frame.classList.contains("shown") && cancelPreview(), START_TIMEOUT_MS);
   progress = { id, t: 0 };
 }
 
+let answered = false;
+
 window.addEventListener("message", (e) => {
   if (e.origin !== YT || !active || e.source !== active.frame.contentWindow) return;
+  answered = true;
   let data: any;
   try {
     data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
@@ -132,6 +152,7 @@ window.addEventListener("message", (e) => {
       REVEAL_DELAY_MS,
     );
   } else if (state === 0) cancelPreview();
+  else if (data?.event === "onError") cancelPreview();
 });
 
 /** Keep the preview from stealing keyboard focus from the app. */

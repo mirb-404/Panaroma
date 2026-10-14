@@ -95,6 +95,7 @@ export function createRail() {
     null,
     h("div.rail-logo", null, h("span.logo-mark"), h("span.rail-label.logo-text", null, "Panorama")),
     h("div.rail-items", null, ...items),
+    h("div.rail-hint.rail-label", null, "☰ Settings  ·  LB RB switch tabs"),
     avatar,
   );
   const sync = () => items.forEach((b, i) => b.classList.toggle("focused", router.railFocused && i === idx));

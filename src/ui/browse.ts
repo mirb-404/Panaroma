@@ -5,7 +5,7 @@
 import * as api from "../api";
 import { ApiError, type Item, type Video } from "../api";
 import { decodeEntities, h } from "../dom";
-import type { ActionEvent } from "../input";
+import { pointerIsActive, type ActionEvent } from "../input";
 import { Spring } from "../motion";
 import { edgeBump, type Screen } from "../router";
 import { openItem } from "../routes";
@@ -63,6 +63,8 @@ export class BrowseView implements Screen {
   private resizeObs: ResizeObserver;
   private focusedEl?: HTMLElement;
   private prefetchTimer = 0;
+  /** Card currently hovered for an in-card preview (non-hero screens). */
+  private previewHost?: HTMLElement;
 
   constructor(private opts: BrowseOptions) {
     this.rowsEl = h("div.rows");
@@ -178,8 +180,11 @@ export class BrowseView implements Screen {
     row.cards.forEach((c, i) => {
       const it = items[i];
       if (it.kind !== "video") return;
-      c.addEventListener("mouseenter", () => {
-        if (!this.visible) return;
+      // "mousemove", not "mouseenter": enter fires before the move is recorded,
+      // and it also fires when cards slide under a resting cursor during
+      // controller scrolling, which would make focus jump back.
+      c.addEventListener("mousemove", () => {
+        if (!this.visible || !pointerIsActive()) return;
         if (this.opts.hero) {
           // Hero screens: hovering focuses the card, so the hero (title +
           // preview) always describes what's under the pointer.
@@ -189,9 +194,16 @@ export class BrowseView implements Screen {
             row.idx = i;
             this.syncFocus();
           }
-        } else schedulePreview(it.id, c.querySelector(".thumb")!);
+        } else if (!this.previewHost || this.previewHost !== c) {
+          this.previewHost = c;
+          schedulePreview(it.id, c.querySelector(".thumb")!);
+        }
       });
-      if (!this.opts.hero) c.addEventListener("mouseleave", () => cancelPreview());
+      if (!this.opts.hero)
+        c.addEventListener("mouseleave", () => {
+          this.previewHost = undefined;
+          cancelPreview();
+        });
     });
     row.track.replaceChildren(...row.cards);
     row.el.classList.remove("loading");

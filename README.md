@@ -103,7 +103,7 @@ extras. The installer artwork (`src-tauri/installer/*.bmp`) is rendered from
 
 ## Controls
 
-Any controller with a standard layout works: Xbox, PlayStation (DualShock 4 /
+Any controller with a standard layout works, including one Windows exposes twice (a PlayStation pad plus its DS4Windows/ViGEm virtual Xbox twin counts as one controller): Xbox, PlayStation (DualShock 4 /
 DualSense, ✕ ○ □ △ = A B X Y), Switch Pro and most others. Input comes from the
 web Gamepad API, with native XInput/Windows.Gaming.Input (Rust) as a backup that is
 only used while the web API sees no controller. If Steam is running with Steam Input
@@ -117,7 +117,7 @@ if Panorama doesn't respond.
 | B | Esc / Backspace | Back; from the rail, exit | Back |
 | Y | `/` | Search | Toggle layout (split ↔ theater) |
 | X | – | – | Mute; after an error, open on YouTube |
-| ☰ Menu | – | – | Up Next list |
+| ☰ Start / Options | – | **Settings** (press again to go back) | Up Next list |
 | ⧉ View | `i` | – | Go to channel |
 | LB / RB | `[` `]` | Previous / next tab | Previous (or restart) / next video |
 | LT / RT | `,` `.` | – | Seek ±30 s |

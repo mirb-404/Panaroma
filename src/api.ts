@@ -213,11 +213,14 @@ function fromLockup(l: Json): Item | null {
   const durationText = badges.find((b) => /^\d+(:\d+)+$/.test(b)) ?? "";
   const live = badges.some((b) => /^live$/i.test(b));
   const flat = rows.flat();
+  // On a channel's own page the first line is already "views · age" (no name).
+  const isStat = (t: string) => /view|watching|ago|streamed|premiered|scheduled/i.test(t);
+  const first = rows[0]?.[0] ?? "";
   return video({
     id: l.contentId,
     title,
     channelId: channelIdIn(meta) || channelIdIn(l.metadata),
-    channelTitle: rows[0]?.[0] ?? "",
+    channelTitle: isStat(first) ? "" : first,
     durationText,
     viewsText: flat.find((t) => /view|watching/i.test(t)) ?? "",
     ageText: flat.find((t) => /ago|streamed|premiered/i.test(t)) ?? "",

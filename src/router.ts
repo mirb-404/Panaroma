@@ -56,6 +56,7 @@ class Router {
   private stack: Screen[] = [];
   private overlays: Overlay[] = [];
   tab: TabId = "home";
+  private beforeSettings: TabId = "home";
   railFocused = false;
   onGlobal: (e: ActionEvent) => boolean = () => false;
 
@@ -79,6 +80,15 @@ class Router {
       return;
     }
     if (this.onGlobal(e)) return;
+    // Start / Options (☰) opens Settings from any main screen; again goes back.
+    if (e.action === "menu" && !this.stack.length && !e.repeat) {
+      if (this.tab !== "settings") {
+        this.beforeSettings = this.tab;
+        this.focusRail(false);
+        this.showTab("settings");
+      } else this.showTab(this.beforeSettings);
+      return;
+    }
     if (this.railFocused && !this.stack.length) {
       if (this.rail.onAction(e)) cueFor(e);
       return;

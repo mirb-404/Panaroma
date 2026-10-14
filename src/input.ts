@@ -108,6 +108,18 @@ window.addEventListener(
 window.addEventListener("keyup", (e) => release(`k:${e.code || e.key}`), { capture: true });
 window.addEventListener("blur", releaseAll);
 
+// ---- pointer ---------------------------------------------------------------------
+
+let pointerMovedAt = 0;
+window.addEventListener("mousemove", (e) => {
+  if (e.movementX || e.movementY) pointerMovedAt = performance.now();
+});
+/**
+ * True only right after the user physically moved the mouse. Hover handlers use
+ * it so content scrolling underneath a resting cursor can't steal focus.
+ */
+export const pointerIsActive = () => performance.now() - pointerMovedAt < 250;
+
 // ---- mouse wheel ---------------------------------------------------------------
 
 let wheelAcc = 0;
@@ -219,11 +231,19 @@ function friendlyName(id: string): string {
 // Stick hysteresis, as on the native side: press past 0.55, release under 0.35.
 const PRESS = 0.55;
 const RELEASE = 0.35;
+/** Per-pad state (for stick hysteresis). */
 const padState = new Map<number, Set<string>>();
+/**
+ * Buttons held on ANY pad. Actions fire from changes to this union, so a
+ * controller that Windows exposes twice (e.g. a PlayStation pad plus its
+ * DS4Windows / ViGEm virtual Xbox twin) acts as one: no double presses.
+ */
+let combined: Set<string> | null = null;
 
 function pollWebPads() {
   // Only the focused app window takes controller input.
   if (document.hasFocus()) {
+    const union = new Set<string>();
     for (const gp of webPads()) {
       const prev = padState.get(gp.index);
       const now = new Set<string>();
@@ -241,18 +261,21 @@ function pollWebPads() {
       };
       stick("Left", "Right", lx);
       stick("Up", "Down", ly);
-      // A pad seen for the first time: adopt its current state silently so a
-      // button already held (e.g. the press that woke the API) isn't repeated.
-      if (prev) {
-        for (const n of now) if (!prev.has(n) && PAD[n]) press(`w${gp.index}:${n}`, PAD[n], "pad");
-        for (const n of prev) if (!now.has(n)) release(`w${gp.index}:${n}`);
-      }
       padState.set(gp.index, now);
+      now.forEach((n) => union.add(n));
     }
-  } else if (padState.size) {
+    // First poll: adopt the current state silently so a button already held
+    // (e.g. the press that woke the Gamepad API) isn't repeated.
+    if (combined) {
+      for (const n of union) if (!combined.has(n) && PAD[n]) press(`w:${n}`, PAD[n], "pad");
+      for (const n of combined) if (!union.has(n)) release(`w:${n}`);
+    }
+    combined = union;
+  } else if (combined) {
     // Focus lost mid-hold: release everything so nothing keeps repeating.
-    for (const id of [...held.keys()]) if (id.startsWith("w")) release(id);
+    for (const id of [...held.keys()]) if (id.startsWith("w:")) release(id);
     padState.clear();
+    combined = null;
   }
   requestAnimationFrame(pollWebPads);
 }
