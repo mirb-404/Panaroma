@@ -3,18 +3,23 @@
 // one, otherwise inside the card's thumbnail. After a while it fades back to the
 // image. Opening the video continues from where the preview got to.
 import { h } from "../dom";
+import { isTauri } from "../platform";
 import { settings } from "../settings";
 
-const DWELL_MS = 500;
+/** Long enough that sweeping across cards doesn't start a preview for each one. */
+const DWELL_MS = 250;
 /** How long a hero preview plays before returning to the image. */
 const HERO_PLAY_MS = 30_000;
 const CARD_PLAY_MS = 8000;
 /**
- * YouTube's player flashes a play/pause icon right after playback starts;
- * reveal after it. (Its title bar is cropped away in CSS: the frame is taller
- * than the visible box, so only the letterbox bands it lives in are cut.)
+ * YouTube's player flashes a play icon and title bar right after playback
+ * starts. In the desktop app the embed script hides them ("preview-ready"), so
+ * the preview fades in almost at once; elsewhere it waits a moment longer.
+ * (The title bar is also cropped in CSS: the frame is taller than its box.)
  */
-const REVEAL_DELAY_MS = 4200;
+const REVEAL_DELAY_MS = 120;
+const REVEAL_DELAY_UNHOOKED_MS = 1000;
+let chromeHidden = false;
 const YT = "https://www.youtube.com";
 
 let timer = 0;
@@ -111,14 +116,19 @@ function start(host: HTMLElement, id: string, hero: boolean) {
   // keep announcing until the player answers: a single message sent at "load"
   // can arrive before the player is listening, and then the preview would
   // never learn it's playing (and never show).
-  const announce = () =>
+  const announce = () => {
     frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), YT);
+    if (!chromeHidden) frame.contentWindow?.postMessage({ panorama: "preview" }, YT);
+  };
   frame.addEventListener("load", announce);
   host.append(frame);
   active = { host, frame, id, hero };
   answered = false;
+  // Only the desktop app has the embed script that answers "preview".
+  chromeHidden = !isTauri;
   clearInterval(handshake);
-  handshake = window.setInterval(() => (answered ? clearInterval(handshake) : announce()), 250);
+  // Faster than the player's own handshake: every 100 ms counts here.
+  handshake = window.setInterval(() => (answered && chromeHidden ? clearInterval(handshake) : announce()), 100);
   giveUp = window.setTimeout(() => active?.frame === frame && !frame.classList.contains("shown") && cancelPreview(), START_TIMEOUT_MS);
   progress = { id, t: 0 };
 }
@@ -132,6 +142,10 @@ window.addEventListener("message", (e) => {
   try {
     data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
   } catch {
+    return;
+  }
+  if (data?.panorama === "preview-ready") {
+    chromeHidden = true;
     return;
   }
   const info = data?.info;
@@ -149,7 +163,7 @@ window.addEventListener("message", (e) => {
         a.host.classList.add("previewing");
         stopTimer = window.setTimeout(cancelPreview, a.hero ? HERO_PLAY_MS : CARD_PLAY_MS);
       },
-      REVEAL_DELAY_MS,
+      chromeHidden && isTauri ? REVEAL_DELAY_MS : REVEAL_DELAY_UNHOOKED_MS,
     );
   } else if (state === 0) cancelPreview();
   else if (data?.event === "onError") cancelPreview();

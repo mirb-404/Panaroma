@@ -1711,3 +1711,138 @@ body.immersive .backdrop-video .preview-frame {
   font-size: 0.95rem;
   line-height: 1.45;
 }
+
+/* Mouse: the ◀ ▶ around adjustable values are buttons. */
+.ps-arrow {
+  padding: 0 0.45rem;
+  border-radius: 0.4rem;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.ps-arrow:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.22);
+}
+
+.ps-val {
+  display: inline-block;
+  min-width: 4.5rem;
+  text-align: center;
+}
+
+/* Never taller than the screen, even at large interface sizes. */
+.ps-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 3rem);
+}
+
+.ps-list {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/* ---- player: 16:9 (1080p TVs and monitors) --------------------------------------- */
+
+/* The side panel gets ~24% of a 16:9 screen: tighter spacing, smaller thumbs. */
+[data-aspect="wide"] .np-panel {
+  padding: 1.8rem 1.4rem 1.2rem;
+}
+
+[data-aspect="wide"] .np-title {
+  font-size: 1.3rem;
+}
+
+[data-aspect="wide"] .np-desc {
+  max-height: 4.5rem;
+}
+
+[data-aspect="wide"] .q-thumb {
+  width: 7rem;
+}
+
+[data-aspect="wide"] .legend {
+  display: none;
+}
+
+/* Over a full-width 16:9 video the menu sits closer to the edge. */
+[data-aspect="wide"] .ps-panel {
+  width: min(32rem, 90vw);
+  margin-right: 2rem;
+}
+
+/* ---- player: ultrawide ---------------------------------------------------------- */
+
+/* 21:9 has room for the menu to breathe beside the video's centre. */
+[data-aspect="ultra"] .ps-panel,
+[data-aspect="super"] .ps-panel {
+  margin-right: 4rem;
+}
+
+/* 32:9: the side panel is very wide, so Up next becomes a grid. */
+[data-aspect="super"] .queue {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(24rem, 1fr));
+  align-content: start;
+  gap: 0.4rem 1rem;
+}
+
+[data-aspect="super"] .np-desc {
+  max-width: 60rem;
+}
+
+/* ---- search results: hero layout -------------------------------------------------- */
+/* .search-results starts 8.6rem down (below the search bar); the hero title sits
+   under the bar and the results grid starts where Home's rows do. */
+.search-results .hero-meta {
+  top: 1rem;
+  height: calc(46vh - 10.4rem);
+}
+
+.search-results .with-hero .rows-viewport {
+  top: calc(46vh - 8.6rem);
+}
+
+.legend-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.1rem;
+}
+
+.legend-line span {
+  white-space: nowrap;
+}
+
+/* ---- ultrawide (21:9, 24:10) and super-ultrawide (32:9 and wider) ----------------- */
+
+/* 32:9: a 16:9 hero leaves the middle of the screen empty. Widen it into a
+   panoramic band (the image is cropped top and bottom to cover it). */
+[data-aspect="super"] .backdrop-img,
+[data-aspect="super"] .backdrop-video {
+  width: 58vw;
+  height: 86vh;
+  max-width: none;
+  aspect-ratio: auto;
+}
+
+/* Keep the preview covering the wider band: full width, centred vertically
+   (still taller than 16:9, so YouTube's title band stays cropped). */
+[data-aspect="super"] .backdrop-video .preview-frame {
+  top: 50%;
+  height: auto;
+  aspect-ratio: 16 / 10.62;
+  translate: 0 -50%;
+}
+
+/* Settings: centred with wider columns, instead of hugging the left edge. */
+[data-aspect="ultra"] .settings-screen,
+[data-aspect="super"] .settings-screen {
+  padding-inline: max(var(--gutter), calc((100% - 104rem) / 2));
+}
+
+[data-aspect="ultra"] .settings-body,
+[data-aspect="super"] .settings-body {
+  grid-template-columns: minmax(0, 56rem) minmax(0, 44rem);
+}

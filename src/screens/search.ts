@@ -1,6 +1,6 @@
 import * as api from "../api";
 import { h, icon } from "../dom";
-import type { ActionEvent } from "../input";
+import { pointerIsActive, type ActionEvent } from "../input";
 import type { Screen } from "../router";
 import { settings, updateSettings } from "../settings";
 import { BrowseView } from "../ui/browse";
@@ -8,7 +8,11 @@ import { setBackdrop } from "../ui/chrome";
 import { openTextEntry } from "../ui/textentry";
 import { errorPanel } from "./common";
 
-/** Search: a query bar (field + recent queries) above a results grid. */
+/**
+ * Search: a query bar (field + recent queries) above a results grid. Results
+ * use the hero layout, like Home: the focused (or hovered) video previews in
+ * the top-right of the screen with its title beside the search bar.
+ */
 export function searchScreen(): Screen {
   let query = "";
   let results: BrowseView | null = null;
@@ -49,6 +53,14 @@ export function searchScreen(): Screen {
     updateSettings({ searchHistory: hist });
     results?.onDestroy();
     results = new BrowseView({
+      hero: true,
+      // Hovering a result moves focus into the results, so its preview plays.
+      onFocusItem: () => {
+        if (zone === "bar" && pointerIsActive()) {
+          zone = "results";
+          sync();
+        }
+      },
       rows: [{ title: `Results for “${q}”`, layout: "grid", load: () => api.search(q) }],
       empty: errorPanel,
       youtubePath: `/results?search_query=${encodeURIComponent(q)}`,

@@ -187,12 +187,15 @@ export class BrowseView implements Screen {
         if (!this.visible || !pointerIsActive()) return;
         if (this.opts.hero) {
           // Hero screens: hovering focuses the card, so the hero (title +
-          // preview) always describes what's under the pointer.
+          // preview) always describes what's under the pointer. The rows only
+          // scroll as far as needed to reveal it: re-pinning the hovered card
+          // to the edge would slide the next card under the pointer, which
+          // would then be focused in turn, and the row would run away.
           const ri = this.rows.indexOf(row);
           if (ri >= 0 && (ri !== this.r || row.idx !== i)) {
             this.r = ri;
             row.idx = i;
-            this.syncFocus();
+            this.syncFocus(false, true);
           }
         } else if (!this.previewHost || this.previewHost !== c) {
           this.previewHost = c;
@@ -273,7 +276,8 @@ export class BrowseView implements Screen {
     this.syncFocus(true);
   }
 
-  private syncFocus(snap = false) {
+  /** `reveal`: pointer focus — scroll only enough to bring the card into view. */
+  private syncFocus(snap = false, reveal = false) {
     this.rows.forEach((row, i) => row.el.classList.toggle("active", i === this.r));
     const row = this.row;
     const c = row?.cards[row.idx];
@@ -290,7 +294,13 @@ export class BrowseView implements Screen {
       const vw = (row.track.parentElement as HTMLElement).clientWidth;
       const contentW = (row.cards.length - 1) * row.stride + (row.cards[0]?.offsetWidth ?? 0) + this.trackPad(row);
       const max = Math.max(0, contentW - vw);
-      const x = Math.min(row.idx * row.stride, max);
+      let x = row.idx * row.stride;
+      if (reveal && c) {
+        const cur = row.scroll.target;
+        const right = x + c.offsetWidth + this.trackPad(row);
+        x = x < cur ? x : right > cur + vw ? right - vw : cur;
+      }
+      x = Math.min(x, max);
       if (snap && !this.visible) row.scroll.snap(x);
       else row.scroll.to(x);
     }
@@ -303,6 +313,13 @@ export class BrowseView implements Screen {
     let y = Math.max(0, row.el.offsetTop - anchor);
     if (!this.opts.hero) y = Math.min(y, maxY);
     if (this.r === 0 && !this.opts.hero) y = 0;
+    if (reveal) {
+      const cur = this.vscroll.target;
+      const top = row.el.offsetTop;
+      const bottom = top + row.el.offsetHeight;
+      const vh = this.viewport.clientHeight;
+      y = top < cur ? top : bottom > cur + vh ? bottom - vh : cur;
+    }
     this.vscroll.to(y);
 
     this.loadNearbyImages();

@@ -116,7 +116,7 @@ export function settingsScreen(): Screen {
     {
       label: "Fill ultrawide screens",
       value: () => onOff(settings().ultrawideFill),
-      help: "On ultrawide monitors, zooms videos in (up to 1.4×) to fill the width, trimming a little from the top and bottom. It zooms back out while paused or right after you click the player, so YouTube's own controls stay reachable. Press Ⓨ in the player for the side-panel layout instead.",
+      help: "On ultrawide monitors, zooms videos in (up to 1.4×) to fill the width, trimming a little from the top and bottom. Captions and the player controls are kept inside the visible area, and it zooms back out while paused. Press Ⓨ in the player for the side-panel layout instead.",
       select: () => toggle("ultrawideFill"),
     },
     {

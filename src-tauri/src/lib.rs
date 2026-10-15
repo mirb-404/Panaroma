@@ -94,6 +94,8 @@ pub fn run() {
                 .visible(false)
                 .background_color(Color(8, 8, 11, 255))
                 .additional_browser_args(BROWSER_ARGS)
+                // Runs inside the YouTube player iframes (see ytembed.js).
+                .initialization_script_for_all_frames(include_str!("ytembed.js"))
                 .on_navigation(move |u| {
                     // The top-level document must stay on our own origin; anything
                     // else (e.g. a "Watch on YouTube" link) opens in the browser.

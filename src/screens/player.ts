@@ -4,9 +4,9 @@
 // panel instead. Controller input drives the player through its public JS API.
 import * as api from "../api";
 import { decodeEntities, fmtDuration, h } from "../dom";
-import type { ActionEvent } from "../input";
+import { pointerIsActive, type ActionEvent } from "../input";
 import { flip } from "../motion";
-import { isTauri, listen, openYouTube } from "../platform";
+import { isFullscreen, isTauri, listen, openYouTube, setFullscreen } from "../platform";
 import { router, type Screen } from "../router";
 import { openChannel } from "../routes";
 import { settings, updateSettings } from "../settings";
@@ -94,6 +94,7 @@ class AdoptedPlayer {
   setOption(m: string, k: string, v: unknown) { this.cmd("setOption", [m, k, v]); }
   unloadModule(m: string) { this.cmd("unloadModule", [m]); }
   setSize(w: number, h: number) { this.frame.width = String(w); this.frame.height = String(h); }
+  getIframe(): HTMLIFrameElement { return this.frame; }
   destroy() { window.removeEventListener("message", this.onMessage); this.frame.remove(); }
 }
 
@@ -128,19 +129,25 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   let errored = false;
   let resumeOnShow = false;
 
-  const ultra = () => window.innerWidth / window.innerHeight >= 2.0;
-  // With "Fill ultrawide screens" on, ultrawide opens zoomed full-width; Ⓨ
-  // switches to the side-panel layout.
-  let layout: Layout = ultra() && !settings().ultrawideFill ? "split" : "theater";
+  const aspect = () => window.innerWidth / window.innerHeight;
+  // 21:9 with "Fill ultrawide screens" on opens zoomed full-width. 32:9 and
+  // wider always open with the side panel: zooming 16:9 to fill them would crop
+  // half the picture, so the panel uses the space instead. Ⓨ switches.
+  let layout: Layout = aspect() >= 3.2 || (aspect() >= 2.0 && !settings().ultrawideFill) ? "split" : "theater";
 
   // Ultrawide fill: in theater layout the 16:9 player is zoomed (≤1.4×) to fill
-  // the width, cropping top and bottom. It zooms out while paused and right
-  // after a click into the player, so YouTube's controls stay reachable.
+  // the width, cropping top and bottom. In the desktop app the player is
+  // "hooked" (see src-tauri/src/ytembed.js) and keeps its captions and controls
+  // inside the visible area. Without the hook it zooms out while paused, right
+  // after a click into the player, and whenever captions are on.
   const MAX_ZOOM = 1.4;
   let unzoomed = true; // until playback starts
   let rezoomTimer = 0;
+  let hooked = false;
+  let captionsOn = false;
   function fillZoom(W: number, H: number): number {
     if (layout !== "theater" || !settings().ultrawideFill || unzoomed) return 1;
+    if (captionsOn && !hooked) return 1;
     return Math.min(MAX_ZOOM, Math.max(1, W / ((H * 16) / 9)));
   }
   function setUnzoomed(on: boolean) {
@@ -166,10 +173,13 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   const bar = h("div.np-bar", null, barFill);
   const stateEl = h("div.np-state");
   const queueEl = h("div.queue", { "data-native-scroll": true });
+  // Each hint is unbreakable, so narrow panels wrap between hints, not inside them.
+  const hints = (items: string[]) => h("div.legend-line", null, ...items.map((t) => h("span", null, t)));
   const legend = h(
     "div.legend",
     null,
-    "Ⓐ play/pause   ◀ ▶ seek   ▲ ▼ volume   LB/RB prev/next   Ⓨ layout   ☰ settings   ⧉ channel   Ⓑ back",
+    hints(["Ⓐ play/pause", "◀ ▶ seek", "▲ ▼ volume", "LB/RB prev/next", "Ⓨ layout", "☰ settings", "⧉ channel", "Ⓑ back"]),
+    hints(["Keyboard:", "Space/K play", "J L seek", "M mute", "C captions", "S settings", "Esc back"]),
   );
   const panel = h(
     "aside.np-panel",
@@ -208,6 +218,60 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     videoBox.style.top = `${Math.round((H - hgt) / 2)}px`;
     panel.style.width = `${Math.round(panelW)}px`;
     player?.setSize?.(Math.round(w), Math.round(hgt));
+    // Rows of the player cropped off the top and bottom of the screen.
+    cropInset = Math.max(0, (Math.round(hgt) - H) / 2);
+    if (hooked) hookEmbed();
+  }
+
+  // ---- embed hook (desktop app) ---------------------------------------------------
+  let cropInset = 0;
+  let hookTimer = 0;
+  const playerFrame = (): HTMLIFrameElement | null => player?.getIframe?.() ?? null;
+  function hookEmbed() {
+    playerFrame()?.contentWindow?.postMessage({ panorama: "hook", inset: cropInset }, YT_ORIGIN);
+  }
+  /** The embed script may load after the player: keep asking for a while. */
+  function startHook() {
+    if (!isTauri) return;
+    clearInterval(hookTimer);
+    let tries = 0;
+    hookEmbed();
+    hookTimer = window.setInterval(() => (hooked || ++tries > 20 ? clearInterval(hookTimer) : hookEmbed()), 500);
+  }
+  const onEmbedMessage = (e: MessageEvent) => {
+    const frame = playerFrame();
+    if (e.origin !== YT_ORIGIN || !frame || e.source !== frame.contentWindow) return;
+    const d = e.data;
+    if (!d || typeof d !== "object" || typeof d.panorama !== "string") return;
+    if (d.panorama === "hooked") {
+      hooked = true;
+      clearInterval(hookTimer);
+    } else if (d.panorama === "settings") {
+      // YouTube's gear, clicked: show Panorama's menu instead.
+      refocusApp();
+      togglePlaybackSettings();
+    } else if (d.panorama === "captions") {
+      captionsOn = !!d.on;
+    }
+  };
+
+  function setCaptions(on: boolean) {
+    captionsOn = on;
+    if (hooked) playerFrame()?.contentWindow?.postMessage({ panorama: "captions", on }, YT_ORIGIN);
+    else if (on) {
+      // Loading the module alone doesn't always pick a track: choose the
+      // viewer's language (YouTube falls back to auto-captions).
+      player?.loadModule?.("captions");
+      const lang = (navigator.language || "en").split("-")[0];
+      setTimeout(() => player?.setOption?.("captions", "track", { languageCode: lang }), 700);
+    } else player?.unloadModule?.("captions");
+    // Without the hook, zoom out so the captions aren't cropped.
+    if (!hooked) {
+      const from = videoBox.getBoundingClientRect();
+      sizeVideo();
+      flip(videoBox, from);
+    }
+    cue(on ? "toggleOn" : "toggleOff");
   }
 
   function setLayout(l: Layout) {
@@ -277,13 +341,20 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   }
 
   // ---- playback settings (☰) ------------------------------------------------------
-  // YouTube's own gear menu needs a mouse; this is the controller version.
-  let captionsOn = false;
+  // YouTube's own gear menu needs a mouse; this is the controller version, and
+  // in the desktop app YouTube's gear opens it too. Mouse: hover to focus,
+  // click a row or its ◀ ▶ arrows, click outside to close.
   const RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   const QUALITY: Record<string, string> = {
     highres: "Above 4K", hd2160: "2160p (4K)", hd1440: "1440p", hd1080: "1080p", hd720: "720p",
     large: "480p", medium: "360p", small: "240p", tiny: "144p",
   };
+  let psOpen = false;
+
+  function togglePlaybackSettings() {
+    if (psOpen) router.closeOverlay();
+    else openPlaybackSettings();
+  }
 
   function openPlaybackSettings() {
     let idx = 0;
@@ -292,18 +363,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       {
         label: "Captions",
         value: () => (captionsOn ? "On" : "Off"),
-        help: "Subtitles in the video's language, or YouTube's automatic captions.",
-        select: () => {
-          captionsOn = !captionsOn;
-          if (captionsOn) {
-            // Loading the module alone doesn't always pick a track: choose the
-            // viewer's language (YouTube falls back to auto-captions).
-            player?.loadModule?.("captions");
-            const lang = (navigator.language || "en").split("-")[0];
-            setTimeout(() => player?.setOption?.("captions", "track", { languageCode: lang }), 700);
-          } else player?.unloadModule?.("captions");
-          cue(captionsOn ? "toggleOn" : "toggleOff");
-        },
+        help: "Subtitles in the video's language, or YouTube's automatic captions. C on the keyboard also switches them.",
+        select: () => setCaptions(!captionsOn),
       },
       {
         label: "Speed",
@@ -315,19 +376,18 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         },
       },
       {
+        // Display only: embedded players can't be told a quality (YouTube
+        // ignores the request) and opening youtube.com to pick one breaks the
+        // lean-back flow. The player is sized to the screen, which is what
+        // YouTube's automatic choice is based on.
         label: "Quality",
         value: () => `Auto${QUALITY[player?.getPlaybackQuality?.() ?? ""] ? ` · ${QUALITY[player.getPlaybackQuality()]}` : ""}`,
-        help: "YouTube picks the quality for embedded players automatically (bigger players get higher quality). Select to open this video on YouTube, where you can choose it.",
-        select: () => {
-          router.closeOverlay();
-          player?.pauseVideo?.();
-          openYouTube(`/watch?v=${current.id}`).catch(() => {});
-        },
+        help: "YouTube picks the quality automatically from the player's size and your connection. Panorama sizes the player to your screen, so it streams the best quality your display can show.",
       },
       {
         label: "Fill ultrawide screens",
         value: () => (settings().ultrawideFill ? "On" : "Off"),
-        help: "Zoom the video to fill an ultrawide screen (full layout).",
+        help: "Zoom the video to fill an ultrawide screen (full layout). Captions and controls stay in view.",
         select: () => {
           updateSettings({ ultrawideFill: !settings().ultrawideFill });
           const from = videoBox.getBoundingClientRect();
@@ -364,26 +424,77 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
 
     const list = h("div.ps-list");
     const help = h("p.ps-help");
+    const activate = (i: number) => {
+      const r = rows[i];
+      if (r.select) r.select();
+      else if (r.adjust) (r.adjust(1), cue("sliderUp"));
+    };
     const els = rows.map((r, i) => {
-      const el = h("div.s-row", { onclick: () => ((idx = i), r.select?.(), sync()) }, h("span.s-label", null, r.label), h("span.s-value"));
-      list.append(el);
-      return el;
+      const value = h("span.s-value");
+      if (r.adjust) {
+        const arrow = (d: 1 | -1) =>
+          h(
+            "button.ps-arrow",
+            {
+              onclick: (ev: Event) => {
+                ev.stopPropagation();
+                idx = i;
+                r.adjust!(d);
+                cue(d < 0 ? "sliderDown" : "sliderUp");
+                sync();
+              },
+            },
+            d < 0 ? "◀" : "▶",
+          );
+        value.append(arrow(-1), h("span.ps-val"), arrow(1));
+      }
+      const row = h(
+        `div.s-row${r.select || r.adjust ? "" : ".static"}`,
+        {
+          onclick: () => {
+            idx = i;
+            activate(i);
+            sync();
+          },
+          onmousemove: () => {
+            if (idx !== i && pointerIsActive()) ((idx = i), sync());
+          },
+        },
+        h("span.s-label", null, r.label),
+        value,
+      );
+      list.append(row);
+      return row;
     });
     const sync = () => {
       els.forEach((el, i) => {
         el.classList.toggle("focused", i === idx);
         const v = rows[i].value?.() ?? "";
-        el.querySelector(".s-value")!.textContent = v && rows[i].adjust ? `◀  ${v}  ▶` : v;
+        if (rows[i].adjust) el.querySelector(".ps-val")!.textContent = v;
+        else el.querySelector(".s-value")!.textContent = v;
       });
       help.textContent = rows[idx].help;
     };
-    const el = h("div.overlay.playback-settings", null, h("div.ps-panel", null, h("h2", null, "Playback"), list, help, h("p.te-legend", null, "Ⓐ select   ◀ ▶ change   Ⓑ / ☰ close")));
+    const el: HTMLElement = h(
+      "div.overlay.playback-settings",
+      // Click outside the card closes it.
+      {
+        onclick: (ev: Event) => {
+          if (ev.target === el) router.closeOverlay();
+        },
+      },
+      h("div.ps-panel", null, h("h2", null, "Playback"), list, help, h("p.te-legend", null, "Ⓐ select   ◀ ▶ change   Ⓑ / ☰ close   ·   Mouse: click, or click outside to close")),
+    );
     sync();
     // Values like quality and speed settle a moment after a change.
     const refresh = window.setInterval(sync, 500);
+    psOpen = true;
     router.openOverlay({
       el,
-      onClose: () => clearInterval(refresh),
+      onClose: () => {
+        psOpen = false;
+        clearInterval(refresh);
+      },
       onAction(e: ActionEvent) {
         const r = rows[idx];
         if (e.action === "up") idx = Math.max(0, idx - 1);
@@ -392,7 +503,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
           if (!r.adjust) return true;
           r.adjust(e.action === "left" ? -1 : 1);
           cue(e.action === "left" ? "sliderDown" : "sliderUp");
-        } else if (e.action === "select") (r.select ?? (() => r.adjust?.(1)))();
+        } else if (e.action === "select") activate(idx);
         else if (e.action === "menu") {
           router.closeOverlay();
           return true;
@@ -444,6 +555,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
           }
           player.playVideo();
           refocusApp();
+          startHook();
         },
         onStateChange: (e: any) => {
           state = e.data;
@@ -580,8 +692,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   // Clicking the player moves keyboard focus into its cross-origin iframe, where
   // our key handlers can't see it. Hand focus back to the app right after.
   const onBlur = () => {
-    // A click went into the player: show it whole for a moment.
-    if (document.activeElement?.tagName === "IFRAME" && settings().ultrawideFill) {
+    // A click went into the player: show it whole for a moment (only needed
+    // when the hook can't keep YouTube's controls inside the visible area).
+    if (document.activeElement?.tagName === "IFRAME" && settings().ultrawideFill && !hooked) {
       setUnzoomed(true);
       rezoomTimer = window.setTimeout(() => state === State.Playing && setUnzoomed(false), 5000);
     }
@@ -590,6 +703,56 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   function refocusApp() {
     if (document.activeElement?.tagName === "IFRAME") (document.activeElement as HTMLElement).blur();
     window.focus();
+  }
+
+  // PC shortcuts (YouTube's own keys), on top of the shared arrow/Enter/Esc mapping.
+  const onKey = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
+    const k = e.key.toLowerCase();
+    if (psOpen && k !== "s") return;
+    const handled = (() => {
+      switch (k) {
+        case "k":
+          if (!e.repeat) togglePlay();
+          return true;
+        case "j":
+          seekBy(-10);
+          return true;
+        case "l":
+          seekBy(10);
+          return true;
+        case "m":
+          if (!e.repeat) toggleMute();
+          return true;
+        case "c":
+          if (!e.repeat) (setCaptions(!captionsOn), flash(captionsOn ? "Captions on" : "Captions off"));
+          return true;
+        case "s":
+          if (!e.repeat) togglePlaybackSettings();
+          return true;
+        case "f":
+          if (!e.repeat) isFullscreen().then((fs) => setFullscreen(!fs));
+          return true;
+      }
+      return false;
+    })();
+    if (handled) e.preventDefault();
+  };
+  // Right-click anywhere outside the video opens the playback menu.
+  const onContextMenu = (e: MouseEvent) => {
+    e.preventDefault();
+    togglePlaybackSettings();
+  };
+
+  function togglePlay() {
+    if (state === State.Playing) player?.pauseVideo();
+    else player?.playVideo();
+    flash(state === State.Playing ? "❚❚ Paused" : "▶ Play");
+  }
+
+  function toggleMute() {
+    if (player?.isMuted?.()) (player.unMute(), flash("Sound on"));
+    else (player?.mute?.(), flash("Muted"));
   }
 
   renderInfo();
@@ -601,6 +764,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       sizeVideo();
       window.addEventListener("resize", onResize);
       window.addEventListener("blur", onBlur);
+      window.addEventListener("message", onEmbedMessage);
+      window.addEventListener("keydown", onKey);
+      el.addEventListener("contextmenu", onContextMenu);
       if (!player) requestAnimationFrame(() => create());
       else if (resumeOnShow) player.playVideo?.();
       resumeOnShow = false;
@@ -613,6 +779,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       }
       window.removeEventListener("resize", onResize);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("message", onEmbedMessage);
+      window.removeEventListener("keydown", onKey);
+      el.removeEventListener("contextmenu", onContextMenu);
     },
     onDestroy() {
       destroyed = true;
@@ -620,6 +789,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       clearInterval(progressTimer);
       clearTimeout(autoNext);
       clearTimeout(seekCommit);
+      clearInterval(hookTimer);
+      window.removeEventListener("message", onEmbedMessage);
+      window.removeEventListener("keydown", onKey);
       try {
         player?.destroy?.();
       } catch {
@@ -654,9 +826,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       const repeatBoost = 1 + Math.min(5, Math.floor(e.count / 4));
       switch (e.action) {
         case "select":
-          if (state === State.Playing) player?.pauseVideo();
-          else player?.playVideo();
-          flash(state === State.Playing ? "❚❚ Paused" : "▶ Play");
+          togglePlay();
           return true;
         case "left":
           seekBy(-10 * repeatBoost);
@@ -688,12 +858,11 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
           setLayout(layout === "split" ? "theater" : "split");
           return true;
         case "menu":
-          openPlaybackSettings();
+          togglePlaybackSettings();
           return true;
         case "alt":
           if (errored) openWatchView(current.id);
-          else if (player?.isMuted?.()) (player.unMute(), flash("Sound on"));
-          else (player?.mute?.(), flash("Muted"));
+          else toggleMute();
           return true;
         case "info":
           openChannel(current.channelId);
