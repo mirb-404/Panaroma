@@ -106,7 +106,8 @@ function start(host: HTMLElement, id: string, hero: boolean) {
     hl: navigator.language,
   });
   const frame = h("iframe.preview-frame", {
-    src: `${YT}/embed/${id}?${params}`,
+    // The marker lets the embed script hide YouTube's overlays from the first frame.
+    src: `${YT}/embed/${id}?${params}#panorama-preview`,
     allow: "autoplay; encrypted-media",
     referrerpolicy: "strict-origin-when-cross-origin",
     tabindex: "-1",

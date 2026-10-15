@@ -1,8 +1,8 @@
 // Injected into every frame of Panorama's main window; it only acts inside
 // YouTube's embedded player and stays dormant until the parent page asks.
-// "preview": a muted hover preview. YouTube's start-of-playback overlays (play
-// icon, spinner, title bar) are hidden, so the preview can fade in the moment
-// it plays instead of waiting them out.
+// "preview" (or #panorama-preview in the URL): a muted hover preview. All of
+// YouTube's overlays (play/pause icons, spinner, controls, title bar) are
+// hidden, so the preview can fade in the moment it plays.
 // "hook": the full player (also sent when a preview is handed over to it,
 // which brings the overlays back). Once hooked:
 //  - the player's gear button opens Panorama's playback menu instead of
@@ -21,32 +21,46 @@
   let hooked = false;
   let inset = 0;
 
+  // Previews show the picture only: every layer of YouTube's UI (control bar,
+  // play/pause bezel, spinner, title, unmute button, end screens) is a sibling
+  // of the video container, so hiding all of those siblings covers new overlay
+  // types too. Previews are marked in their URL (#panorama-preview), so this
+  // applies from the very first frame instead of after a handshake.
   const previewStyle = document.createElement("style");
   const setPreview = (on) => {
     previewStyle.textContent = on
-      ? `.ytp-chrome-top, .ytp-chrome-bottom, .ytp-gradient-top, .ytp-gradient-bottom, .ytp-bezel,
-         .ytp-bezel-text-wrapper, .ytp-spinner, .ytp-unmute, .ytp-large-play-button, .ytp-pause-overlay,
-         .ytp-paid-content-overlay, .ytp-ce-element { display: none !important; }`
+      ? `.html5-video-player > :not(.html5-video-container), .ytp-bezel, .ytp-spinner, .ytp-large-play-button,
+         .ytp-pause-overlay, .ytp-chrome-top, .ytp-chrome-bottom, .ytp-gradient-top, .ytp-gradient-bottom
+         { display: none !important; }`
       : "";
   };
+  const markedPreview = location.hash.includes("panorama-preview");
+  setPreview(markedPreview);
 
   const style = document.createElement("style");
+  // While hooked, YouTube's own settings menu never shows (Panorama's opens
+  // instead), even if a player update opens it from a control we don't catch.
+  const HOOKED_CSS = `.ytp-settings-menu, .ytp-popup.ytp-settings-menu { display: none !important; }`;
   const applyInset = () => {
     const px = Math.max(0, Math.round(inset));
-    style.textContent = px
+    const crop = px
       ? `.ytp-caption-window-container { top: ${px}px !important; height: calc(100% - ${2 * px}px) !important; }
          .ytp-chrome-bottom, .ytp-gradient-bottom { bottom: ${px}px !important; }
          .ytp-chrome-top, .ytp-gradient-top { top: ${px}px !important; }`
       : "";
+    style.textContent = hooked ? HOOKED_CSS + crop : "";
   };
-  const mount = () => (document.head || document.documentElement).append(style, previewStyle);
+  const mount = () => {
+    (document.head || document.documentElement).append(style, previewStyle);
+    if (markedPreview) send("preview-ready");
+  };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount);
   else mount();
 
   // The gear: swallow every event YouTube might open its menu on, and ask the
   // app for its own menu on click (or keyboard activation).
   const onGear = (e) => e.target instanceof Element && e.target.closest(".ytp-settings-button");
-  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "touchstart", "touchend", "click"]) {
     addEventListener(
       type,
       (e) => {

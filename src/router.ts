@@ -29,6 +29,11 @@ export interface Screen {
   onDestroy?(): void;
   /** Pushed screens that cover the whole window (the player). */
   immersive?: boolean;
+  /**
+   * Screens that can keep running docked in a corner (the player's
+   * miniplayer). Back docks them instead of closing them; `on` false restores.
+   */
+  minimize?(on: boolean): void;
 }
 
 export interface Overlay {
@@ -55,6 +60,8 @@ class Router {
   private roots = new Map<TabId, Screen>();
   private stack: Screen[] = [];
   private overlays: Overlay[] = [];
+  /** A docked screen (the miniplayer), outside the stack and still running. */
+  private mini: Screen | null = null;
   tab: TabId = "home";
   private beforeSettings: TabId = "home";
   railFocused = false;
@@ -80,6 +87,12 @@ class Router {
       return;
     }
     if (this.onGlobal(e)) return;
+    // While a miniplayer is docked: back closes it, Info (View / I) restores it.
+    if (this.mini && !e.repeat && (e.action === "back" || e.action === "info")) {
+      if (e.action === "back") this.closeMini();
+      else this.restoreMini();
+      return;
+    }
     // Start / Options (☰) opens Settings from any main screen; again goes back.
     if (e.action === "menu" && !this.stack.length && !e.repeat) {
       if (this.tab !== "settings") {
@@ -100,7 +113,8 @@ class Router {
 
     switch (e.action) {
       case "back":
-        if (this.stack.length) this.pop();
+        if (this.top?.minimize && this.stack.length) this.minimize();
+        else if (this.stack.length) this.pop();
         else this.focusRail(true);
         return;
       case "left":
@@ -197,6 +211,48 @@ class Router {
     document.body.classList.toggle("immersive", !!(this.stack.length && now.immersive));
     show(now.el, instant ? undefined : "return");
     now.onShow?.();
+  }
+
+  /** Docks the top screen as a miniplayer and returns to the screen under it. */
+  minimize() {
+    const s = this.stack[this.stack.length - 1];
+    if (!s?.minimize) return;
+    this.stack.pop();
+    cue("back");
+    this.mini = s;
+    s.minimize(true);
+    const now = this.top!;
+    document.body.classList.toggle("immersive", !!(this.stack.length && now.immersive));
+    show(now.el, "return");
+    now.onShow?.();
+  }
+
+  /** Brings the miniplayer back to full screen, over the current screen. */
+  restoreMini() {
+    const s = this.mini;
+    if (!s) return;
+    this.mini = null;
+    this.focusRail(false);
+    const under = this.top;
+    under?.onHide?.();
+    cue("open");
+    this.stack.push(s);
+    document.body.classList.toggle("immersive", !!s.immersive);
+    s.minimize!(false);
+    if (under) hide(under.el, "behind");
+  }
+
+  closeMini() {
+    const s = this.mini;
+    if (!s) return;
+    this.mini = null;
+    cue("back");
+    s.onDestroy?.();
+    if (settings().reducedMotion) s.el.remove();
+    else {
+      s.el.classList.add("mini-leaving");
+      setTimeout(() => s.el.remove(), 250);
+    }
   }
 
   private silent = new WeakSet<Overlay>();

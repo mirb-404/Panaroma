@@ -5,8 +5,10 @@ import { playerScreen } from "./screens/player";
 import { playlistScreen } from "./screens/playlist";
 
 export function openItem(item: Item, queue: Video[] = [], startAt = 0, handoff?: HTMLIFrameElement) {
-  if (item.kind === "video") router.push(playerScreen(item, queue.length ? queue : [item], startAt, handoff));
-  else if (item.kind === "channel") router.push(channelScreen(item.id));
+  if (item.kind === "video") {
+    router.closeMini(); // a new video replaces the miniplayer
+    router.push(playerScreen(item, queue.length ? queue : [item], startAt, handoff));
+  } else if (item.kind === "channel") router.push(channelScreen(item.id));
   else router.push(playlistScreen(item));
 }
 

@@ -9,7 +9,7 @@ import { flip } from "../motion";
 import { isFullscreen, isTauri, listen, openYouTube, setFullscreen } from "../platform";
 import { router, type Screen } from "../router";
 import { openChannel } from "../routes";
-import { settings, updateSettings } from "../settings";
+import { settings, updateSettings, type Settings } from "../settings";
 import { cue } from "../sound";
 import { setBackdrop, toast } from "../ui/chrome";
 
@@ -145,8 +145,10 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   let rezoomTimer = 0;
   let hooked = false;
   let captionsOn = false;
+  /** Docked bottom right as a miniplayer (Back from the player). */
+  let mini = false;
   function fillZoom(W: number, H: number): number {
-    if (layout !== "theater" || !settings().ultrawideFill || unzoomed) return 1;
+    if (mini || layout !== "theater" || !settings().ultrawideFill || unzoomed) return 1;
     if (captionsOn && !hooked) return 1;
     return Math.min(MAX_ZOOM, Math.max(1, W / ((H * 16) / 9)));
   }
@@ -161,7 +163,20 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
 
   // ---- DOM --------------------------------------------------------------------
   const host = h("div");
-  const videoBox = h("div.video-box", null, host);
+  // Miniplayer: click to expand, ✕ (or Back) to close.
+  const miniClose = h(
+    "button.mini-close",
+    {
+      title: "Close",
+      onclick: (ev: Event) => {
+        ev.stopPropagation();
+        router.closeMini();
+      },
+    },
+    "✕",
+  );
+  const miniHint = h("div.mini-hint", null, "Ⓑ / Esc close  ·  View / I expand");
+  const videoBox = h("div.video-box", { onclick: () => mini && router.restoreMini() }, host, miniClose, miniHint);
   const ambient = h("div.player-ambient");
   const osd = h("div.osd");
   const titleEl = h("h1.np-title");
@@ -200,6 +215,21 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   function sizeVideo() {
     const W = window.innerWidth;
     const H = window.innerHeight;
+    if (mini) {
+      // Docked bottom right: sized by the shorter side, so it stays a sensible
+      // size from 4:3 to 32:9 and at any resolution.
+      const w = Math.round(Math.min(W * 0.28, H * 0.5));
+      const hgt = Math.round((w * 9) / 16);
+      const margin = Math.round(H * 0.035);
+      videoBox.style.width = `${w}px`;
+      videoBox.style.height = `${hgt}px`;
+      videoBox.style.left = `${W - w - margin}px`;
+      videoBox.style.top = `${H - hgt - margin}px`;
+      player?.setSize?.(w, hgt);
+      cropInset = 0;
+      if (hooked) hookEmbed();
+      return;
+    }
     const panelW = layout === "split" ? Math.max(W * 0.24, Math.min(W - (H * 16) / 9, W * 0.42)) : 0;
     const availW = W - panelW;
     let w = availW;
@@ -252,8 +282,17 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       togglePlaybackSettings();
     } else if (d.panorama === "captions") {
       captionsOn = !!d.on;
+      if (captionsOn) applyCaptionSize();
     }
   };
+
+  /** YouTube's caption font scale: -1 is its smallest, 0 its default. */
+  const CAPTION_SCALE: Record<Settings["captionSize"], number> = { small: -1, medium: 0, large: 1 };
+  const CAPTION_LABEL: Record<Settings["captionSize"], string> = { small: "Small", medium: "Medium", large: "Large" };
+  const CAPTION_SIZES: Settings["captionSize"][] = ["small", "medium", "large"];
+  function applyCaptionSize() {
+    player?.setOption?.("captions", "fontSize", CAPTION_SCALE[settings().captionSize]);
+  }
 
   function setCaptions(on: boolean) {
     captionsOn = on;
@@ -263,7 +302,10 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       // viewer's language (YouTube falls back to auto-captions).
       player?.loadModule?.("captions");
       const lang = (navigator.language || "en").split("-")[0];
-      setTimeout(() => player?.setOption?.("captions", "track", { languageCode: lang }), 700);
+      setTimeout(() => {
+        player?.setOption?.("captions", "track", { languageCode: lang });
+        applyCaptionSize();
+      }, 700);
     } else player?.unloadModule?.("captions");
     // Without the hook, zoom out so the captions aren't cropped.
     if (!hooked) {
@@ -365,6 +407,16 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         value: () => (captionsOn ? "On" : "Off"),
         help: "Subtitles in the video's language, or YouTube's automatic captions. C on the keyboard also switches them.",
         select: () => setCaptions(!captionsOn),
+      },
+      {
+        label: "Caption size",
+        value: () => CAPTION_LABEL[settings().captionSize],
+        help: "How big subtitles are drawn over the video. Use ◀ ▶ to change.",
+        adjust: (d) => {
+          const i = Math.max(0, Math.min(CAPTION_SIZES.length - 1, CAPTION_SIZES.indexOf(settings().captionSize) + d));
+          updateSettings({ captionSize: CAPTION_SIZES[i] });
+          applyCaptionSize();
+        },
       },
       {
         label: "Speed",
@@ -757,16 +809,38 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
 
   renderInfo();
 
+  // Input listeners: only while full screen. Resize and embed messages also
+  // run while docked as a miniplayer.
+  function attachInput() {
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("keydown", onKey);
+    el.addEventListener("contextmenu", onContextMenu);
+  }
+  function detachInput() {
+    window.removeEventListener("blur", onBlur);
+    window.removeEventListener("keydown", onKey);
+    el.removeEventListener("contextmenu", onContextMenu);
+  }
+
   return {
     el,
     immersive: true,
+    minimize(on: boolean) {
+      const from = videoBox.getBoundingClientRect();
+      mini = on;
+      el.classList.toggle("mini", on);
+      if (on) {
+        detachInput();
+        if (focus === "queue") setFocus("video");
+      } else attachInput();
+      sizeVideo();
+      flip(videoBox, from);
+    },
     onShow() {
       sizeVideo();
       window.addEventListener("resize", onResize);
-      window.addEventListener("blur", onBlur);
       window.addEventListener("message", onEmbedMessage);
-      window.addEventListener("keydown", onKey);
-      el.addEventListener("contextmenu", onContextMenu);
+      attachInput();
       if (!player) requestAnimationFrame(() => create());
       else if (resumeOnShow) player.playVideo?.();
       resumeOnShow = false;
@@ -778,10 +852,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         player?.pauseVideo?.();
       }
       window.removeEventListener("resize", onResize);
-      window.removeEventListener("blur", onBlur);
       window.removeEventListener("message", onEmbedMessage);
-      window.removeEventListener("keydown", onKey);
-      el.removeEventListener("contextmenu", onContextMenu);
+      detachInput();
     },
     onDestroy() {
       destroyed = true;
@@ -790,8 +862,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       clearTimeout(autoNext);
       clearTimeout(seekCommit);
       clearInterval(hookTimer);
+      window.removeEventListener("resize", onResize);
       window.removeEventListener("message", onEmbedMessage);
-      window.removeEventListener("keydown", onKey);
+      detachInput();
       try {
         player?.destroy?.();
       } catch {

@@ -1680,22 +1680,138 @@ body.immersive .backdrop-video .preview-frame {
   color: var(--muted);
 }
 
+/* ---- miniplayer (Back from the player) ----------------------------------------- */
+
+/* The screen stays full-window but transparent and click-through, so the page
+   underneath scrolls and takes input; only the docked video is interactive. */
+.player-screen.mini {
+  background: transparent;
+  pointer-events: none;
+}
+
+.player-screen.mini .player-ambient,
+.player-screen.mini .np-panel,
+.player-screen.mini .osd {
+  display: none;
+}
+
+.player-screen.mini .video-box {
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 0.8rem;
+  box-shadow: 0 1.2rem 3.5rem rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* Clicks go to the box (expand), not into YouTube's player. */
+.player-screen.mini .video-box iframe {
+  pointer-events: none;
+}
+
+.player-screen.mini-leaving .video-box {
+  transition: opacity 0.22s var(--ease), transform 0.22s var(--ease);
+  opacity: 0;
+  transform: translateY(1rem) scale(0.96);
+}
+
+.mini-close,
+.mini-hint {
+  position: absolute;
+  display: none;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+
+.mini-close {
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 99rem;
+  place-items: center;
+  font-size: 0.95rem;
+}
+
+.mini-close:hover {
+  background: var(--accent);
+}
+
+.mini-hint {
+  left: 0.5rem;
+  bottom: 0.5rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 99rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.player-screen.mini .mini-close {
+  display: grid;
+}
+
+.player-screen.mini .mini-hint {
+  display: block;
+}
+
+/* Hint shows for a few seconds after docking, controls on hover. */
+.player-screen.mini .mini-hint {
+  animation: mini-hint 4s var(--ease);
+}
+
+.player-screen.mini .video-box:hover .mini-close,
+.player-screen.mini .video-box:hover .mini-hint {
+  opacity: 1;
+}
+
+@keyframes mini-hint {
+  0%,
+  80% {
+    opacity: 1;
+  }
+}
+
 /* ---- playback settings (player ☰) ------------------------------------------- */
 
+/* A full-height drawer that slides in from the right edge, at every aspect
+   ratio and resolution; the video stays in view to its left. Solid, so
+   nothing behind it (side panel, video) shows through. */
 .overlay.playback-settings {
-  place-items: center end;
-  background: linear-gradient(to right, transparent 35%, rgba(0, 0, 0, 0.82));
+  place-items: stretch end;
+  background: linear-gradient(to right, transparent 45%, rgba(0, 0, 0, 0.6));
   backdrop-filter: none;
 }
 
-/* A solid card, so nothing behind it (side panel, video) shows through. */
 .ps-panel {
-  width: min(36rem, 90vw);
-  margin-right: 3rem;
-  padding: 1.8rem 1.2rem 1.4rem;
-  border-radius: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  width: min(34rem, 92vw);
+  height: 100%;
+  padding: 2.6rem 1.2rem 1.6rem;
   background: rgba(14, 14, 19, 0.97);
-  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  box-shadow: -2rem 0 5rem rgba(0, 0, 0, 0.6), inset 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.overlay-in > .ps-panel {
+  animation: ps-slide-in 0.32s var(--ease) both;
+}
+
+.overlay-out > .ps-panel {
+  animation: ps-slide-out 0.2s var(--ease) both;
+}
+
+@keyframes ps-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes ps-slide-out {
+  to {
+    transform: translateX(100%);
+  }
 }
 
 .ps-panel h2 {
@@ -1731,13 +1847,6 @@ body.immersive .backdrop-video .preview-frame {
   text-align: center;
 }
 
-/* Never taller than the screen, even at large interface sizes. */
-.ps-panel {
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100vh - 3rem);
-}
-
 .ps-list {
   min-height: 0;
   overflow-y: auto;
@@ -1767,19 +1876,7 @@ body.immersive .backdrop-video .preview-frame {
   display: none;
 }
 
-/* Over a full-width 16:9 video the menu sits closer to the edge. */
-[data-aspect="wide"] .ps-panel {
-  width: min(32rem, 90vw);
-  margin-right: 2rem;
-}
-
 /* ---- player: ultrawide ---------------------------------------------------------- */
-
-/* 21:9 has room for the menu to breathe beside the video's centre. */
-[data-aspect="ultra"] .ps-panel,
-[data-aspect="super"] .ps-panel {
-  margin-right: 4rem;
-}
 
 /* 32:9: the side panel is very wide, so Up next becomes a grid. */
 [data-aspect="super"] .queue {
