@@ -145,6 +145,10 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   let rezoomTimer = 0;
   let hooked = false;
   let captionsOn = false;
+  /** Hooked only: the qualities YouTube offers (best first), what plays, and the viewer's pick. */
+  let qualities: { quality: string; label: string }[] = [];
+  let qualityNow = "";
+  let qualityPick = "auto";
   /** Docked bottom right as a miniplayer (Back from the player). */
   let mini = false;
   function fillZoom(W: number, H: number): number {
@@ -258,7 +262,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   let hookTimer = 0;
   const playerFrame = (): HTMLIFrameElement | null => player?.getIframe?.() ?? null;
   function hookEmbed() {
-    playerFrame()?.contentWindow?.postMessage({ panorama: "hook", inset: cropInset }, YT_ORIGIN);
+    playerFrame()?.contentWindow?.postMessage({ panorama: "hook", inset: cropInset, quality: qualityPick }, YT_ORIGIN);
   }
   /** The embed script may load after the player: keep asking for a while. */
   function startHook() {
@@ -283,8 +287,19 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     } else if (d.panorama === "captions") {
       captionsOn = !!d.on;
       if (captionsOn) applyCaptionSize();
+    } else if (d.panorama === "quality" && Array.isArray(d.list)) {
+      qualities = d.list.filter((q: any) => typeof q?.quality === "string" && typeof q?.label === "string");
+      qualityNow = typeof d.current === "string" ? d.current : "";
     }
   };
+
+  /** Auto, then lowest to best, so ▶ goes up in quality. */
+  function setQuality(d: 1 | -1) {
+    const opts = ["auto", ...qualities.map((q) => q.quality).reverse()];
+    const i = Math.max(0, Math.min(opts.length - 1, opts.indexOf(qualityPick) + d));
+    qualityPick = opts[i];
+    playerFrame()?.contentWindow?.postMessage({ panorama: "quality", quality: qualityPick }, YT_ORIGIN);
+  }
 
   /** YouTube's caption font scale: -1 is its smallest, 0 its default. */
   const CAPTION_SCALE: Record<Settings["captionSize"], number> = { small: -1, medium: 0, large: 1 };
@@ -427,15 +442,26 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
           player?.setPlaybackRate?.(RATES[i < 0 ? 3 : i]);
         },
       },
-      {
-        // Display only: embedded players can't be told a quality (YouTube
-        // ignores the request) and opening youtube.com to pick one breaks the
-        // lean-back flow. The player is sized to the screen, which is what
-        // YouTube's automatic choice is based on.
-        label: "Quality",
-        value: () => `Auto${QUALITY[player?.getPlaybackQuality?.() ?? ""] ? ` · ${QUALITY[player.getPlaybackQuality()]}` : ""}`,
-        help: "YouTube picks the quality automatically from the player's size and your connection. Panorama sizes the player to your screen, so it streams the best quality your display can show.",
-      },
+      hooked && qualities.length
+        ? {
+            // The embed script lists YouTube's own qualities, HDR ones
+            // included ("1080p HDR"), and applies the pick.
+            label: "Quality",
+            value: () => {
+              const picked = qualities.find((q) => q.quality === qualityPick)?.label;
+              return picked ?? `Auto${qualityNow ? ` · ${qualityNow}` : ""}`;
+            },
+            help: "Every quality YouTube offers for this video, HDR included when your display has HDR on. Auto lets YouTube choose. Use ◀ ▶ to change.",
+            adjust: setQuality,
+          }
+        : {
+            // Display only: without the embed hook, embedded players can't be
+            // told a quality (YouTube ignores the request). The player is sized
+            // to the screen, which is what YouTube's automatic choice is based on.
+            label: "Quality",
+            value: () => `Auto${QUALITY[player?.getPlaybackQuality?.() ?? ""] ? ` · ${QUALITY[player.getPlaybackQuality()]}` : ""}`,
+            help: "YouTube picks the quality automatically from the player's size and your connection. Panorama sizes the player to your screen, so it streams the best quality your display can show.",
+          },
       {
         label: "Fill ultrawide screens",
         value: () => (settings().ultrawideFill ? "On" : "Off"),

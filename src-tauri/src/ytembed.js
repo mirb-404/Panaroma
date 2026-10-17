@@ -8,7 +8,10 @@
 //  - the player's gear button opens Panorama's playback menu instead of
 //    YouTube's (which needs a mouse and offers nothing the app doesn't);
 //  - captions and the control bar are kept inside the visible area when
-//    "Fill ultrawide screens" crops the top and bottom of the player.
+//    "Fill ultrawide screens" crops the top and bottom of the player;
+//  - the qualities YouTube offers (with labels like "1080p HDR") are reported
+//    to the app, and the app's pick is applied, since the IFrame API can't set
+//    a quality. This uses #movie_player's own methods, checked before each use.
 // Only stable hooks are used (ytp-* class names that have been unchanged for
 // years); if they ever change, the player simply behaves like a normal embed.
 (() => {
@@ -96,6 +99,40 @@
     }
   }, 500);
 
+  // Quality: report what YouTube offers and plays; apply the app's pick, again
+  // whenever a new video loads (its list replaces the old one).
+  const moviePlayer = () => {
+    const p = document.getElementById("movie_player");
+    return p && typeof p.getAvailableQualityData === "function" && typeof p.setPlaybackQualityRange === "function"
+      ? p
+      : null;
+  };
+  let qualityPick = "auto";
+  let qualityReport = "";
+  let pickedFor = "";
+  const applyQuality = (p, list) => {
+    if (qualityPick === "auto") p.setPlaybackQualityRange("auto", "auto");
+    else if (list.some((x) => x.quality === qualityPick)) p.setPlaybackQualityRange(qualityPick, qualityPick);
+  };
+  setInterval(() => {
+    const p = hooked && moviePlayer();
+    if (!p) return;
+    const list = (p.getAvailableQualityData() || [])
+      .filter((x) => x && x.quality && x.quality !== "auto" && x.isPlayable !== false)
+      .map((x) => ({ quality: x.quality, label: x.qualityLabel || x.quality }));
+    const video = (p.getVideoData && p.getVideoData().video_id) || "";
+    if (list.length && video !== pickedFor) {
+      pickedFor = video;
+      applyQuality(p, list);
+    }
+    const current = typeof p.getPlaybackQualityLabel === "function" ? p.getPlaybackQualityLabel() : "";
+    const report = JSON.stringify({ list, current });
+    if (report !== qualityReport) {
+      qualityReport = report;
+      send("quality", { list, current });
+    }
+  }, 500);
+
   addEventListener("message", (e) => {
     if (e.source !== parent || (parentOrigin !== "*" && e.origin !== parentOrigin)) return;
     const d = e.data;
@@ -107,12 +144,17 @@
       setPreview(false);
       hooked = true;
       inset = Number(d.inset) || 0;
+      if (typeof d.quality === "string") qualityPick = d.quality;
       applyInset();
       send("hooked", { captions: !!ccButton() });
     } else if (d.panorama === "captions") {
       const b = ccButton();
       const on = !!b && b.getAttribute("aria-pressed") === "true";
       if (b && on !== !!d.on) b.click();
+    } else if (d.panorama === "quality" && typeof d.quality === "string") {
+      qualityPick = d.quality;
+      const p = moviePlayer();
+      if (p) applyQuality(p, p.getAvailableQualityData() || []);
     }
   });
 })();

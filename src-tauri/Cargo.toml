@@ -1,6 +1,6 @@
 [package]
 name = "panorama"
-version = "3.2.0"
+version = "3.3.0"
 description = "Panorama - controller-first YouTube client"
 authors = ["Panorama"]
 edition = "2024"
