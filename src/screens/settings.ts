@@ -98,7 +98,7 @@ export function settingsScreen(): Screen {
       section: "Display",
       label: "Region",
       value: () => settings().region,
-      help: "Country used for Trending and category shelves. Use ◀ ▶ to change.",
+      help: "Country YouTube tailors results and recommendations to. Use ◀ ▶ to change.",
       adjust: (d) => {
         updateSettings({ region: cycle(REGIONS, settings().region, d) });
         refreshContent();
@@ -141,7 +141,7 @@ export function settingsScreen(): Screen {
     {
       label: "Video previews",
       value: () => onOff(settings().hoverPreview),
-      help: "Hover over a video, or rest the controller on it, and it plays muted in the thumbnail for a few seconds.",
+      help: "Rest on a video, or hover over it, and a muted preview plays: in the large area at the top on Home, Subscriptions and Library, or inside the card elsewhere. Opening the video continues from the preview.",
       select: () => toggle("hoverPreview"),
     },
     {
