@@ -12,8 +12,10 @@
 //  - the qualities YouTube offers (with labels like "1080p HDR") are reported
 //    to the app, and the app's pick is applied, since the IFrame API can't set
 //    a quality. This uses #movie_player's own methods, checked before each use.
-// Only stable hooks are used (ytp-* class names that have been unchanged for
-// years); if they ever change, the player simply behaves like a normal embed.
+// Only stable hooks are used: the classic player's ytp-* class names (unchanged
+// for years) and, for YouTube's newer player (controls in body > #player-controls,
+// settings in a bottom sheet), its gear and CC buttons. If they ever change, the
+// player simply behaves like a normal embed.
 (() => {
   if (location.hostname !== "www.youtube.com" || !location.pathname.startsWith("/embed/")) return;
   if (window.top === window || window.__panoramaEmbed) return;
@@ -27,13 +29,16 @@
   // Previews show the picture only: every layer of YouTube's UI (control bar,
   // play/pause bezel, spinner, title, unmute button, end screens) is a sibling
   // of the video container, so hiding all of those siblings covers new overlay
-  // types too. Previews are marked in their URL (#panorama-preview), so this
-  // applies from the very first frame instead of after a handshake.
+  // types too. The newer player keeps its controls (play/pause included) outside
+  // the player element, in #player-controls. Previews are marked in their URL
+  // (#panorama-preview), so this applies from the very first frame instead of
+  // after a handshake.
   const previewStyle = document.createElement("style");
   const setPreview = (on) => {
     previewStyle.textContent = on
       ? `.html5-video-player > :not(.html5-video-container), .ytp-bezel, .ytp-spinner, .ytp-large-play-button,
-         .ytp-pause-overlay, .ytp-chrome-top, .ytp-chrome-bottom, .ytp-gradient-top, .ytp-gradient-bottom
+         .ytp-pause-overlay, .ytp-chrome-top, .ytp-chrome-bottom, .ytp-gradient-top, .ytp-gradient-bottom,
+         #player-controls, .ytPlayerControlsContainerHost, #bottom-sheet-wrapper
          { display: none !important; }`
       : "";
   };
@@ -49,7 +54,8 @@
     const crop = px
       ? `.ytp-caption-window-container { top: ${px}px !important; height: calc(100% - ${2 * px}px) !important; }
          .ytp-chrome-bottom, .ytp-gradient-bottom { bottom: ${px}px !important; }
-         .ytp-chrome-top, .ytp-gradient-top { top: ${px}px !important; }`
+         .ytp-chrome-top, .ytp-gradient-top { top: ${px}px !important; }
+         #player-controls { top: ${px}px !important; height: calc(100% - ${2 * px}px) !important; }`
       : "";
     style.textContent = hooked ? HOOKED_CSS + crop : "";
   };
@@ -62,7 +68,7 @@
 
   // The gear: swallow every event YouTube might open its menu on, and ask the
   // app for its own menu on click (or keyboard activation).
-  const onGear = (e) => e.target instanceof Element && e.target.closest(".ytp-settings-button");
+  const onGear = (e) => e.target instanceof Element && e.target.closest(".ytp-settings-button, .player-settings-icon");
   for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "touchstart", "touchend", "click"]) {
     addEventListener(
       type,
@@ -87,7 +93,7 @@
   );
 
   // Captions: report YouTube's own CC state so the app's menu stays in sync.
-  const ccButton = () => document.querySelector(".ytp-subtitles-button");
+  const ccButton = () => document.querySelector(".ytp-subtitles-button, .ytmClosedCaptioningButtonButton");
   let ccState = null;
   setInterval(() => {
     if (!hooked) return;
