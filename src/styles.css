@@ -1943,3 +1943,344 @@ body.immersive .backdrop-video .preview-frame {
 [data-aspect="super"] .settings-body {
   grid-template-columns: minmax(0, 56rem) minmax(0, 44rem);
 }
+
+/* ---- settings: mouse arrows on cycling rows ------------------------------------- */
+
+.s-adjust {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.s-arrow {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  color: inherit;
+  opacity: 0.55;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.s-arrow:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.22);
+}
+
+/* ---- shelves: mouse paging arrows ------------------------------------------------ */
+
+.track-viewport {
+  position: relative;
+}
+
+.row-page {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: calc(var(--gutter) + 0.4rem);
+  display: grid;
+  place-items: center;
+  color: var(--fg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease), background-color 0.2s;
+}
+
+.row-page.prev {
+  left: 0;
+  background: linear-gradient(to right, rgba(8, 8, 11, 0.85), rgba(8, 8, 11, 0));
+}
+
+.row-page.next {
+  right: 0;
+  background: linear-gradient(to left, rgba(8, 8, 11, 0.85), rgba(8, 8, 11, 0));
+}
+
+.row-page .icon {
+  width: 2rem;
+  height: 2rem;
+  filter: drop-shadow(0 0.1rem 0.4rem rgba(0, 0, 0, 0.6));
+  transition: transform 0.2s var(--ease);
+}
+
+.row-page:hover .icon {
+  transform: scale(1.25);
+}
+
+body:not(.cursor-hidden) .row:hover .row-page {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ---- mouse back button -------------------------------------------------------------- */
+
+.mouse-back {
+  position: fixed;
+  z-index: 45;
+  top: 1.6rem;
+  left: 1.6rem;
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--fg);
+  background: rgba(20, 20, 26, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0.4rem 1.6rem rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.85);
+  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease), background-color 0.15s;
+}
+
+.mouse-back .icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.mouse-back:hover {
+  background: var(--fg);
+  color: #000;
+}
+
+body.can-back:not(.cursor-hidden) .mouse-back {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+/* ---- controls tutorial ------------------------------------------------------------- */
+
+.overlay.tutorial {
+  display: block;
+  background: none;
+  backdrop-filter: none;
+}
+
+.overlay-in.tutorial > * {
+  animation: none;
+}
+
+.overlay-in.tutorial {
+  animation: tut-fade 0.7s var(--ease) both;
+}
+
+@keyframes tut-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.tut-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.tut-hole {
+  transition: x 0.55s var(--ease), y 0.55s var(--ease), width 0.55s var(--ease), height 0.55s var(--ease);
+}
+
+.tut-ring {
+  position: absolute;
+  border-radius: 18px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 2.4rem 0.4rem rgba(255, 61, 72, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: left 0.55s var(--ease), top 0.55s var(--ease), width 0.55s var(--ease), height 0.55s var(--ease),
+    opacity 0.3s;
+}
+
+.tut-ring.on {
+  opacity: 1;
+  animation: tut-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes tut-pulse {
+  50% {
+    box-shadow: 0 0 0 3px #fff, 0 0 3.4rem 0.8rem rgba(255, 61, 72, 0.6);
+  }
+}
+
+/* Points left at rotate 0; rotated toward the spotlight. */
+.tut-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: left 0.55s var(--ease), top 0.55s var(--ease), rotate 0.55s var(--ease), opacity 0.3s;
+}
+
+.tut-arrow.on {
+  opacity: 1;
+}
+
+.tut-arrow span {
+  position: absolute;
+  left: -1.5rem;
+  top: -1.1rem;
+  width: 3rem;
+  height: 2.2rem;
+  background: var(--fg);
+  clip-path: polygon(0 50%, 45% 0, 45% 30%, 100% 30%, 100% 70%, 45% 70%, 45% 100%);
+  filter: drop-shadow(0 0 0.8rem rgba(255, 61, 72, 0.8));
+  animation: tut-nudge 1.1s ease-in-out infinite;
+}
+
+@keyframes tut-nudge {
+  50% {
+    translate: -0.7rem 0;
+  }
+}
+
+.tut-card {
+  position: absolute;
+  width: min(36rem, calc(100vw - 3rem));
+  padding: 2rem 2.2rem 1.6rem;
+  border-radius: 1.4rem;
+  background: rgba(18, 18, 24, 0.82);
+  backdrop-filter: blur(24px) saturate(1.3);
+  box-shadow: 0 1.6rem 4rem rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: left 0.55s var(--ease), top 0.55s var(--ease);
+}
+
+.tut-devices {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.2rem;
+}
+
+.tut-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 99rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--faint);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.tut-chip .icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.tut-chip.on {
+  color: #000;
+  background: var(--fg);
+}
+
+.tut-dots {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+}
+
+.tut-dots span {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 99rem;
+  background: rgba(255, 255, 255, 0.2);
+  transition: width 0.3s var(--ease), background-color 0.3s;
+}
+
+.tut-dots span.past {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.tut-dots span.on {
+  width: 1.4rem;
+  background: var(--accent);
+}
+
+.tut-title {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.tut-title.tut-welcome {
+  font-size: 2.6rem;
+  background: linear-gradient(100deg, #fff 30%, #ff8a92);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.tut-body {
+  margin-top: 0.6rem;
+  font-size: 1.1rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.tut-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1.2rem;
+  margin-top: 1.1rem;
+}
+
+.tut-keys:empty {
+  display: none;
+}
+
+.tut-key {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.tut-key kbd {
+  min-width: 2.4rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.55rem;
+  text-align: center;
+  font: inherit;
+  font-size: 1.05rem;
+  color: #000;
+  background: var(--fg);
+  box-shadow: inset 0 -0.2rem 0 rgba(0, 0, 0, 0.25);
+}
+
+.tut-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 1.6rem;
+}
+
+.tut-skip {
+  margin-left: auto;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tut-skip:hover,
+.tut-prev:hover {
+  color: var(--fg);
+}
+
+.tut-hint {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(243, 243, 246, 0.42);
+}
+
+html.reduced-motion .tut-hole,
+html.reduced-motion .tut-ring,
+html.reduced-motion .tut-arrow,
+html.reduced-motion .tut-card {
+  transition: none;
+}

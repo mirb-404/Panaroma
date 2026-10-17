@@ -9,12 +9,13 @@ import { searchScreen } from "./screens/search";
 import { settingsScreen } from "./screens/settings";
 import { homeScreen, libraryScreen, subscriptionsScreen } from "./screens/tabs";
 import { loadSettings, settings, updateSettings } from "./settings";
-import { applyScale, backdropEl, createClock, createRail, toast, toastHost } from "./ui/chrome";
+import { applyScale, backButton, backdropEl, createClock, createRail, toast, toastHost } from "./ui/chrome";
 import { playStartup } from "./ui/intro";
 import { loadIframeApi } from "./screens/player";
 import { signInFlow } from "./screens/common";
 import { loadSounds } from "./sound";
 import { confirmDialog } from "./ui/textentry";
+import { detectDevice, showTutorial } from "./ui/tutorial";
 
 async function main() {
   await loadSettings();
@@ -29,7 +30,7 @@ async function main() {
   const rail = createRail();
   const stage = h("main.stage");
   const overlays = h("div.overlays");
-  document.getElementById("app")!.append(backdropEl, stage, rail.el, overlays, toastHost, createClock());
+  document.getElementById("app")!.append(backdropEl, stage, rail.el, overlays, toastHost, createClock(), backButton);
 
   router.init(stage, overlays, rail, {
     home: homeScreen,
@@ -59,8 +60,9 @@ async function main() {
   // First boot (or signed out): open Google's sign-in once the intro is done.
   // The session is remembered after that.
   const restored = restoreSession();
-  Promise.all([startup, restored]).then(() => {
-    if (!signedIn() && canSignIn()) signInFlow();
+  Promise.all([startup, restored]).then(async () => {
+    if (!signedIn() && canSignIn()) await signInFlow();
+    welcome();
   });
 
   await restored;
@@ -79,9 +81,10 @@ async function main() {
       .catch(() => {});
   };
   syncAvatar();
-  onAuth(() => {
+  onAuth((on) => {
     syncAvatar();
     router.resetAll();
+    if (on) welcome();
   });
 
   router.showTab("home");
@@ -93,13 +96,31 @@ async function main() {
     else if (e.type === "disconnected") toast("Controller disconnected");
   });
 
-  // TV feel: the cursor disappears when it's not being used.
+  // TV feel: the cursor disappears when it's not being used (and stays hidden
+  // until the mouse first moves).
+  document.body.classList.add("cursor-hidden");
   let idle = 0;
   window.addEventListener("mousemove", () => {
     document.body.classList.remove("cursor-hidden");
     clearTimeout(idle);
     idle = window.setTimeout(() => document.body.classList.add("cursor-hidden"), 2500);
   });
+}
+
+/**
+ * First launch: once signed in (sign-in needs the desktop app, so the browser
+ * build skips that), greet the user and tour the controls of the device in
+ * use. It runs once; Settings → Controls replays it.
+ */
+let welcoming = false;
+async function welcome() {
+  if (welcoming || settings().tutorialSeen || (canSignIn() && !signedIn())) return;
+  welcoming = true;
+  // Let Home lay out its first row so the spotlight has something to point at.
+  await new Promise((r) => setTimeout(r, 900));
+  await showTutorial(await detectDevice(), { welcome: true });
+  updateSettings({ tutorialSeen: true });
+  welcoming = false;
 }
 
 /**

@@ -131,6 +131,7 @@ pub fn run() {
             set_fullscreen,
             is_fullscreen,
             quit_app,
+            gamepad::pad_connected,
             youtube::yt_signed_in,
             youtube::yt_api,
             youtube::yt_open_sign_in,

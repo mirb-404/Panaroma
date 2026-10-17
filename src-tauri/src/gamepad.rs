@@ -6,7 +6,7 @@
 //! Events are emitted to the frontend as `pad` events; key-repeat and navigation
 //! semantics live in the frontend so keyboard and controller share one code path.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +22,15 @@ enum PadEvent {
     Axis { axis: &'static str, value: f32 },
     Connected { name: String },
     Disconnected,
+}
+
+/// Controllers gilrs currently sees. The web Gamepad API hides a pad until one of
+/// its buttons is pressed, so the frontend asks here to pick the right tutorial.
+static CONNECTED: AtomicUsize = AtomicUsize::new(0);
+
+#[tauri::command]
+pub fn pad_connected() -> bool {
+    CONNECTED.load(Ordering::Relaxed) > 0
 }
 
 /// Stick deflection that counts as a direction press, and the lower value it must
@@ -98,10 +107,14 @@ pub fn spawn(app: AppHandle, focused: Arc<AtomicBool>) {
             let mut ly = StickAxis { neg: "Down", pos: "Up", state: 0 };
             let mut was_focused = true;
             let mut out = Vec::with_capacity(8);
+            CONNECTED.store(gilrs.gamepads().count(), Ordering::Relaxed);
 
             loop {
                 let is_focused = focused.load(Ordering::Relaxed);
                 while let Some(ev) = gilrs.next_event() {
+                    if matches!(ev.event, EventType::Connected | EventType::Disconnected) {
+                        CONNECTED.store(gilrs.gamepads().count(), Ordering::Relaxed);
+                    }
                     if !is_focused {
                         continue;
                     }

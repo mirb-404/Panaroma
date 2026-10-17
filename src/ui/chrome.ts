@@ -1,6 +1,6 @@
 // App-wide chrome: the cinematic backdrop, the navigation rail, toasts and the clock.
 import { h, icon } from "../dom";
-import type { ActionEvent } from "../input";
+import { trigger, type ActionEvent } from "../input";
 import { router, TABS, type TabId } from "../router";
 import { settings } from "../settings";
 import { cue } from "../sound";
@@ -95,7 +95,7 @@ export function createRail() {
     null,
     h("div.rail-logo", null, h("span.logo-mark"), h("span.rail-label.logo-text", null, "Panorama")),
     h("div.rail-items", null, ...items),
-    h("div.rail-hint.rail-label", null, "☰ Settings  ·  LB RB switch tabs"),
+    h("div.rail-hint.rail-label", null, "☰ / S  Settings  ·  LB RB / [ ]  tabs"),
     avatar,
   );
   const sync = () => items.forEach((b, i) => b.classList.toggle("focused", router.railFocused && i === idx));
@@ -141,6 +141,16 @@ export function createRail() {
     },
   };
 }
+
+// ---- mouse back button ----------------------------------------------------------
+// Mice without side buttons still need a way back: shown in the top-left corner
+// while the pointer is in use and Back would do something.
+
+export const backButton = h(
+  "button.mouse-back",
+  { onclick: () => trigger("back"), title: "Back", "aria-label": "Back" },
+  icon("back"),
+);
 
 // ---- toasts ---------------------------------------------------------------------
 

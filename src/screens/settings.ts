@@ -7,6 +7,7 @@ import { edgeBump, router, TABS, type Screen } from "../router";
 import { onSettings, settings, updateSettings, type Settings } from "../settings";
 import { cue, loadSounds, setSoundVolume } from "../sound";
 import { playStartup } from "../ui/intro";
+import { DEVICE_LABEL, showTutorial } from "../ui/tutorial";
 import { applyScale, setBackdrop, toast } from "../ui/chrome";
 import { confirmDialog } from "../ui/textentry";
 import { signInFlow } from "./common";
@@ -186,6 +187,17 @@ export function settingsScreen(): Screen {
       help: "Play the current startup intro now.",
       select: () => playStartup(true),
     },
+    ...(["pad", "keyboard", "mouse"] as const).map((d, i): Row => ({
+      section: i === 0 ? "Controls" : undefined,
+      label: `${DEVICE_LABEL[d]} tutorial`,
+      help:
+        d === "pad"
+          ? "A quick tour of the controller controls: moving around, previews, the menu, Settings, Search and the player. Xbox, PlayStation and Switch Pro controllers all work."
+          : d === "keyboard"
+            ? "A quick tour of the keyboard controls. Everything in Panorama can be done with the keyboard alone."
+            : "A quick tour of the mouse controls. Everything in Panorama can be done with the mouse alone.",
+      select: () => void showTutorial(d),
+    })),
     {
       section: "Data",
       label: "Clear cache",
@@ -222,6 +234,11 @@ export function settingsScreen(): Screen {
       select: () => openExternal("https://myaccount.google.com/permissions"),
     },
     {
+      label: "Version",
+      value: () => __APP_VERSION__,
+      help: `Panorama ${__APP_VERSION__}, made by Mirang Bhandari. Free and open-source software under the GNU General Public License v3 or later. Panorama is not affiliated with or endorsed by YouTube or Google.`,
+    },
+    {
       label: "Quit Panorama",
       help: "Close the app.",
       select: () => quitApp(),
@@ -232,17 +249,30 @@ export function settingsScreen(): Screen {
   const help = h("aside.settings-help");
   const els = rows.map((r) => {
     const val = h("span.s-value");
+    // Mouse: ◀ ▶ are buttons on cycling rows; clicking elsewhere selects.
+    const arrow = (dir: -1 | 1) =>
+      h(`button.s-arrow`, {
+        onclick: (ev: Event) => {
+          ev.stopPropagation();
+          idx = els.indexOf(row);
+          r.adjust!(dir);
+          cue(dir < 0 ? "sliderDown" : "sliderUp");
+          sync();
+        },
+        "aria-label": dir < 0 ? "Previous value" : "Next value",
+      }, dir < 0 ? "◀" : "▶");
     const row = h(
       `div.s-row${r.select || r.adjust ? "" : ".static"}`,
       {
         onclick: () => {
           idx = els.indexOf(row);
-          r.select?.();
+          if (r.select) r.select();
+          else if (r.adjust) (r.adjust(1), cue("sliderUp"));
           sync();
         },
       },
       h("span.s-label", null, r.label),
-      val,
+      r.adjust ? h("span.s-adjust", null, arrow(-1), val, arrow(1)) : val,
     );
     if (r.section) list.append(h("h3.s-section", null, r.section));
     list.append(row);
@@ -254,7 +284,7 @@ export function settingsScreen(): Screen {
       e.classList.toggle("focused", i === idx);
       const v = rows[i].value?.();
       const valEl = e.querySelector(".s-value")!;
-      valEl.textContent = v ? (rows[i].adjust ? `◀  ${v}  ▶` : v) : "";
+      valEl.textContent = v ?? "";
     });
     help.replaceChildren(
       h("h2", null, rows[idx].label),

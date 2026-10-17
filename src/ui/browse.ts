@@ -4,11 +4,12 @@
 // transforms (no layout per frame).
 import * as api from "../api";
 import { ApiError, type Item, type Video } from "../api";
-import { decodeEntities, h } from "../dom";
+import { decodeEntities, h, icon } from "../dom";
 import { pointerIsActive, type ActionEvent } from "../input";
 import { Spring } from "../motion";
 import { edgeBump, type Screen } from "../router";
 import { openItem } from "../routes";
+import { cue } from "../sound";
 import { card, loadCardImage, skeletonCards, type CardEl } from "./card";
 import { setBackdrop } from "./chrome";
 import { cancelPreview, previewTime, schedulePreview, takePreview } from "./preview";
@@ -91,17 +92,38 @@ export class BrowseView implements Screen {
 
   private makeRow(spec: RowSpec, title: string | null, grid: boolean): Row {
     const track = h("div.track");
+    const viewport = h("div.track-viewport", null, track);
     const el = h(
       `div.row${grid ? ".grid-row" : ""}${spec.size === "large" ? ".large" : ""}`,
       null,
       title ? h("h3.row-title", null, title) : null,
-      h("div.track-viewport", null, track),
+      viewport,
     );
     const row: Row = {
       el, track, cards: [], items: [], idx: 0, grid, stride: 0, offset: 0, source: spec,
       scroll: new Spring(0, (x) => (track.style.transform = `translate3d(${-x}px,0,0)`), 260, 31),
     };
+    // Mouse paging: shelves only move when these are clicked, never on hover.
+    if (!grid)
+      viewport.append(
+        h("button.row-page.prev", { onclick: () => this.page(row, -1), "aria-label": "Previous" }, icon("back")),
+        h("button.row-page.next", { onclick: () => this.page(row, 1), "aria-label": "Next" }, icon("next")),
+      );
     return row;
+  }
+
+  /** Moves a shelf by one screenful (mouse arrows at the row's ends). */
+  private page(row: Row, dir: -1 | 1) {
+    if (!row.cards.length) return;
+    this.measure(row);
+    const vw = (row.track.parentElement as HTMLElement).clientWidth;
+    const step = Math.max(1, Math.floor(vw / (row.stride || 1)) - 1);
+    const next = Math.max(0, Math.min(row.cards.length - 1, row.idx + dir * step));
+    if (next === row.idx) return edgeBump();
+    cue("move");
+    row.idx = next;
+    this.r = this.rows.indexOf(row);
+    this.syncFocus();
   }
 
   private addShelf(spec: RowSpec) {
@@ -191,6 +213,11 @@ export class BrowseView implements Screen {
           // scroll as far as needed to reveal it: re-pinning the hovered card
           // to the edge would slide the next card under the pointer, which
           // would then be focused in turn, and the row would run away.
+          // Only cards that are fully on screen take focus from the pointer:
+          // focusing a half-visible card at either end scrolled the row,
+          // sliding the next card under the cursor, so a resting mouse at the
+          // edge cycled through the whole shelf.
+          if (!this.fullyVisible(c)) return;
           const ri = this.rows.indexOf(row);
           if (ri >= 0 && (ri !== this.r || row.idx !== i)) {
             this.r = ri;
@@ -213,6 +240,13 @@ export class BrowseView implements Screen {
     row.stride = 0;
     row.idx = Math.min(row.idx, items.length - 1);
     this.syncFocus(true);
+  }
+
+  private fullyVisible(c: HTMLElement): boolean {
+    const r = c.getBoundingClientRect();
+    const tv = c.closest(".track-viewport")!.getBoundingClientRect();
+    const vv = this.viewport.getBoundingClientRect();
+    return r.left >= tv.left - 1 && r.right <= tv.right + 1 && r.top >= vv.top - 1 && r.bottom <= vv.bottom + 1;
   }
 
   private fail(row: Row, err: unknown) {

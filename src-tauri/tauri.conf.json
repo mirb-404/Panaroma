@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Panorama",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "identifier": "com.panorama.tv",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -27,11 +27,13 @@
     "targets": [
       "msi"
     ],
-    "publisher": "Panorama",
+    "publisher": "Mirang Bhandari",
+    "homepage": "https://github.com/mirb-404/REA_Test",
     "category": "Entertainment",
     "shortDescription": "A lean-back, controller-first YouTube client for ultrawide displays",
     "longDescription": "Panorama is a 10-foot, controller-driven interface for YouTube built on the official YouTube Data API and IFrame Player.",
-    "copyright": "",
+    "copyright": "© 2026 Mirang Bhandari. Licensed under GPL-3.0-or-later.",
+    "license": "GPL-3.0-or-later",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,6 +42,11 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "digestAlgorithm": "sha256",
+      "signCommand": {
+        "cmd": "powershell",
+        "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/sign.ps1", "%1"]
+      },
       "webviewInstallMode": {
         "type": "embedBootstrapper"
       },

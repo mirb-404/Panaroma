@@ -21,6 +21,7 @@
     "allow-set-fullscreen",
     "allow-is-fullscreen",
     "allow-quit-app",
+    "allow-pad-connected",
     "allow-steam-sounds-available",
     "allow-read-steam-sound",
     "allow-import-startup-video",

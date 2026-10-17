@@ -24,6 +24,8 @@ export interface Settings {
   /** The signed-in account's picture and name, cached for instant display. */
   avatarUrl: string;
   accountName: string;
+  /** The first-run welcome and controls tutorial has been shown. */
+  tutorialSeen: boolean;
   /** Bumped when a default changes and saved settings need a one-time update. */
   version: number;
 }
@@ -45,6 +47,7 @@ const defaults: Settings = {
   searchHistory: [],
   avatarUrl: "",
   accountName: "",
+  tutorialSeen: false,
   version: 3,
 };
 

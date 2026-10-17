@@ -1,7 +1,7 @@
 // Unifies keyboard, mouse wheel and controller into one action stream with
 // TV-style auto-repeat: a deliberate first delay, then accelerating repeats so
 // long rows can be skimmed quickly while single taps stay precise.
-import { listen } from "./platform";
+import { invoke, listen } from "./platform";
 
 export type Action =
   | "up" | "down" | "left" | "right"
@@ -16,7 +16,7 @@ export interface ActionEvent {
   repeat: boolean;
   /** How many repeats so far: lets the player scale seek distance while held. */
   count: number;
-  source: "keyboard" | "pad" | "wheel";
+  source: "keyboard" | "pad" | "wheel" | "mouse";
 }
 
 type Handler = (e: ActionEvent) => void;
@@ -24,6 +24,17 @@ let handler: Handler = () => {};
 export function setActionHandler(h: Handler) {
   handler = h;
 }
+
+/** A one-shot action from an on-screen control (e.g. the mouse back button). */
+export function trigger(action: Action, source: ActionEvent["source"] = "mouse") {
+  lastDevice = source === "pad" ? "pad" : source === "keyboard" ? "keyboard" : "mouse";
+  handler({ action, repeat: false, count: 0, source });
+}
+
+/** The device the user touched most recently: picks which controls to teach. */
+export type Device = "keyboard" | "mouse" | "pad";
+let lastDevice: Device = "keyboard";
+export const lastInputDevice = () => lastDevice;
 
 const REPEATABLE = new Set<Action>(["up", "down", "left", "right", "rewind", "forward"]);
 const FIRST_DELAY = 360;
@@ -34,6 +45,7 @@ const held = new Map<string, { action: Action; timer: number; count: number; sou
 
 function press(id: string, action: Action, source: ActionEvent["source"]) {
   if (held.has(id)) return;
+  lastDevice = source === "pad" ? "pad" : source === "keyboard" ? "keyboard" : "mouse";
   handler({ action, repeat: false, count: 0, source });
   if (!REPEATABLE.has(action)) {
     held.set(id, { action, timer: 0, count: 0, source });
@@ -81,6 +93,11 @@ const KEYS: Record<string, Action> = {
   ",": "rewind",
   ".": "forward",
   i: "info",
+  I: "info",
+  s: "menu",
+  S: "menu",
+  x: "alt",
+  X: "alt",
   ContextMenu: "menu",
   MediaPlayPause: "select",
 };
@@ -112,8 +129,22 @@ window.addEventListener("blur", releaseAll);
 
 let pointerMovedAt = 0;
 window.addEventListener("mousemove", (e) => {
-  if (e.movementX || e.movementY) pointerMovedAt = performance.now();
+  if (e.movementX || e.movementY) {
+    pointerMovedAt = performance.now();
+    lastDevice = "mouse";
+  }
 });
+window.addEventListener("mousedown", () => (lastDevice = "mouse"), { capture: true });
+// Mouse "back" side button: the same as Esc / Ⓑ, never browser history.
+window.addEventListener(
+  "mouseup",
+  (e) => {
+    if (e.button !== 3 && e.button !== 4) return;
+    e.preventDefault();
+    if (e.button === 3) trigger("back");
+  },
+  { capture: true },
+);
 /**
  * True only right after the user physically moved the mouse. Hover handlers use
  * it so content scrolling underneath a resting cursor can't steal focus.
@@ -126,6 +157,7 @@ let wheelAcc = 0;
 window.addEventListener(
   "wheel",
   (e) => {
+    lastDevice = "mouse";
     if ((e.target as HTMLElement).closest?.("[data-native-scroll]")) return;
     wheelAcc += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
@@ -199,6 +231,15 @@ export function onPadStatus(fn: (e: PadEvent) => void) {
 }
 
 const webPads = () => (navigator.getGamepads?.() ?? []).filter((p): p is Gamepad => !!p && p.connected);
+
+/**
+ * True when a controller is plugged in. The web API only reveals a pad after
+ * one of its buttons is pressed, so the native side is asked as well.
+ */
+export async function padConnected(): Promise<boolean> {
+  if (webPads().length) return true;
+  return invoke<boolean>("pad_connected").catch(() => false);
+}
 
 export async function initPad() {
   // Native events: only when the web API can't see a controller.

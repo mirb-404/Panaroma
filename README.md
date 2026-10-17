@@ -1,5 +1,7 @@
 # Panorama
 
+*By Mirang Bhandari*
+
 A lean-back, controller-first YouTube client for Windows, designed for ultrawide
 displays. Built on **Tauri v2** (Rust + WebView2) with a framework-free
 TypeScript UI. Users sign in with their normal Google account (like a browser or
@@ -19,6 +21,13 @@ window. Sign in as in any browser (password, 2-step verification and so on). The
 closes by itself, and your Home, subscriptions, history, Watch Later, likes and playlists
 load into the TV interface. The session stays in the app's browser profile, so later
 launches go straight to Home. **Settings → Account → Google account** signs out.
+
+Once signed in, Panorama says **Welcome to Panorama** and gives a short controls
+tour: the screen fades behind a vignette, a spotlight opens on each part of the
+interface (rows, the preview area, the menu, Settings, Search) and an arrow points at
+it. The tour matches the device in use (a connected controller wins, otherwise the
+keyboard or mouse you last touched), and the card can switch device at any time.
+**Settings → Controls** replays the controller, keyboard or mouse tour.
 
 ### How the data works
 
@@ -99,7 +108,30 @@ own UI wherever possible:
 Install → Finish** (with an optional "Launch Panorama" box). No license page and no
 extras. The installer artwork (`src-tauri/installer/*.bmp`) is rendered from
 `tools/installer-art/art.html` with `node tools/installer-art/render.mjs`. Bump
-`version` in `src-tauri/tauri.conf.json` for each release so the MSI upgrades in place.
+`version` in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` for
+each release so the MSI upgrades in place.
+
+The installer and app are published as **Mirang Bhandari** (publisher, copyright and
+file properties).
+
+### Code signing
+
+`pnpm tauri build` signs `panorama.exe` and the MSI with Authenticode (SHA-256, RFC 3161
+timestamp) through `src-tauri/scripts/sign.ps1`. The certificate comes from the
+environment, so no secret is committed:
+
+```powershell
+$env:PANORAMA_SIGN_THUMBPRINT = '<thumbprint>'   # cert in Cert:\CurrentUser\My
+# or
+$env:PANORAMA_SIGN_PFX = 'C:\certs\panorama.pfx'; $env:PANORAMA_SIGN_PFX_PASSWORD = '...'
+$env:PANORAMA_REQUIRE_SIGNING = '1'               # optional: fail instead of building unsigned
+pnpm tauri build
+```
+
+Without a certificate the build still succeeds, unsigned, with a warning. For local
+testing, `src-tauri/scripts/new-dev-cert.ps1` creates a self-signed certificate (other
+PCs show it as an unknown publisher). Public releases need a certificate from a trusted
+CA or Azure Trusted Signing so SmartScreen shows the publisher name.
 
 ## Controls
 
@@ -110,27 +142,32 @@ only used while the web API sees no controller. If Steam is running with Steam I
 enabled for your controller, Steam may capture it; disable Steam Input for desktop use
 if Panorama doesn't respond.
 
-| Xbox controller | Keyboard | Browse | Player |
-|---|---|---|---|
-| D-pad / left stick | Arrows | Move (hold = accelerating repeat) | ◀ ▶ seek ±10 s (grows while held), ▲ ▼ volume |
-| A | Enter / Space | Open | Play / pause |
-| B | Esc / Backspace | Back; from the rail, exit | Back |
-| Y | `/` | Search | Toggle layout (split ↔ theater) |
-| X | – | – | Mute; after an error, open on YouTube |
-| ☰ Start / Options | – | **Settings** (press again to go back) | **Playback settings**: captions, speed, quality, ultrawide fill, layout, Up next |
-| ⧉ View | `i` | – | Go to channel |
-| LB / RB | `[` `]` | Previous / next tab | Previous (or restart) / next video |
-| LT / RT | `,` `.` | – | Seek ±30 s |
-| Right-stick click | F11 | Fullscreen | Fullscreen |
+Each device works on its own: everything can be done with only a controller, only a
+keyboard or only a mouse, and they can be mixed freely.
 
-The mouse and wheel also work. The cursor hides after 2.5 s of inactivity.
+| Xbox controller | Keyboard | Mouse | Browse | Player |
+|---|---|---|---|---|
+| D-pad / left stick | Arrows | Hover, wheel, ‹ › at a row's ends | Move (hold = accelerating repeat) | ◀ ▶ seek ±10 s (grows while held), ▲ ▼ volume |
+| A | Enter / Space | Click (a selected card) | Open | Play / pause |
+| B | Esc / Backspace | ← button (top-left) or mouse back button | Back; from the rail, exit | Back (docks a miniplayer) |
+| Y | `/` | Click Search | Search | Toggle layout (split ↔ theater) |
+| X | `X` | – | – | Mute; after an error, open on YouTube |
+| ☰ Start / Options | `S` | Click ⚙ / right-click in the player | **Settings** (press again to go back) | **Playback settings**: captions, speed, quality, ultrawide fill, layout, Up next |
+| ⧉ View | `i` | Click the channel name | – | Go to channel |
+| LB / RB | `[` `]` | Click a tab in the menu | Previous / next tab | Previous (or restart) / next video |
+| LT / RT | `,` `.` | YouTube's seek bar | – | Seek ±30 s |
+| Right-stick click | F11 | – | Fullscreen | Fullscreen |
+
+Hovering only selects cards that are fully on screen, so a cursor resting at either
+edge of a row never scrolls it; the ‹ › arrows page through a row instead. The cursor
+and the back button hide after 2.5 s without mouse movement.
 
 ## Architecture
 
 ```
 src-tauri/src/
   lib.rs       window, localhost origin, navigation lock, single instance
-  gamepad.rs   native controller input (gilrs, ~250 Hz) → "pad" events
+  gamepad.rs   native controller input (gilrs, ~250 Hz) → "pad" events, pad presence
   youtube.rs   Google sign-in window, session cookies → youtubei API, RSS feeds
   media.rs     Steam UI sounds (read from the user's Steam), custom startup video
 src/
@@ -138,6 +175,7 @@ src/
   input.ts     keyboard / wheel / pad → actions, TV-style accelerating repeat
   router.ts    tab roots (state preserved) + pushed screens + overlays
   ui/browse.ts shelves & grids: spatial focus, per-row memory, lazy thumbnails
+  ui/tutorial.ts first-run welcome and per-device controls tour
   api.ts       YouTube web client: renderer parsing, normalization, IndexedDB cache
   screens/     home, subscriptions, search, library, channel, playlist, player, settings
 ```
@@ -184,3 +222,25 @@ pnpm tauri dev          # desktop app with hot reload
 pnpm dev                # browser only; open http://localhost:1420/?demo for fixture data
 pnpm tauri build        # release build + MSI
 ```
+
+## Author
+
+Panorama is made by **Mirang Bhandari**.
+
+## License
+
+Copyright © 2026 Mirang Bhandari
+
+Panorama is free software: you can redistribute it and/or modify it under the terms of
+the GNU General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version. It is distributed in
+the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE)
+for the full text.
+
+**Additional permission under GNU GPL version 3 section 7:** if you modify this
+program, or any covered work, by linking or combining it with the Steamworks SDK (or a
+modified version of that library), containing parts covered by the terms of the
+Steamworks SDK license, the licensors of this program grant you additional permission
+to convey the resulting work.
+Panorama is not affiliated with or endorsed by YouTube or Google.

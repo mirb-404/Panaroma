@@ -7,6 +7,7 @@ fn main() {
             "set_fullscreen",
             "is_fullscreen",
             "quit_app",
+            "pad_connected",
             "yt_signed_in",
             "yt_api",
             "yt_open_sign_in",

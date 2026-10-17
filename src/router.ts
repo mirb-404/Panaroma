@@ -139,6 +139,11 @@ class Router {
     }
   }
 
+  /** Lets the on-screen back button (mouse) show only when Back would do something. */
+  private syncBack() {
+    document.body.classList.toggle("can-back", !!(this.stack.length || this.overlays.length));
+  }
+
   focusRail(on: boolean) {
     if (this.stack.length) on = false;
     if (on !== this.railFocused) cue(on ? "railIn" : "railOut");
@@ -165,6 +170,7 @@ class Router {
     this.rail.setActive(t);
     show(next.el, "fade");
     next.onShow?.();
+    this.syncBack();
   }
 
   /** Recreates a root tab (e.g. after sign-in or a new API key). */
@@ -193,6 +199,7 @@ class Router {
     show(s.el, "push");
     if (under) hide(under.el, "behind");
     s.onShow?.();
+    this.syncBack();
   }
 
   pop(instant = false) {
@@ -211,6 +218,7 @@ class Router {
     document.body.classList.toggle("immersive", !!(this.stack.length && now.immersive));
     show(now.el, instant ? undefined : "return");
     now.onShow?.();
+    this.syncBack();
   }
 
   /** Docks the top screen as a miniplayer and returns to the screen under it. */
@@ -225,6 +233,7 @@ class Router {
     document.body.classList.toggle("immersive", !!(this.stack.length && now.immersive));
     show(now.el, "return");
     now.onShow?.();
+    this.syncBack();
   }
 
   /** Brings the miniplayer back to full screen, over the current screen. */
@@ -240,6 +249,7 @@ class Router {
     document.body.classList.toggle("immersive", !!s.immersive);
     s.minimize!(false);
     if (under) hide(under.el, "behind");
+    this.syncBack();
   }
 
   closeMini() {
@@ -263,6 +273,7 @@ class Router {
     this.overlays.push(o);
     this.overlayHost.append(o.el);
     o.el.classList.add("overlay-in");
+    this.syncBack();
   }
 
   closeOverlay() {
@@ -271,6 +282,7 @@ class Router {
     if (!this.silent.has(o)) cue("modalClose");
     o.onClose?.();
     o.el.classList.add("overlay-out");
+    this.syncBack();
     setTimeout(() => o.el.remove(), settings().reducedMotion ? 0 : 220);
   }
 }
