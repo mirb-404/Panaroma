@@ -19,8 +19,13 @@ const SIGN_IN_URL: &str = "https://accounts.google.com/ServiceLogin?service=yout
 const FALLBACK_CLIENT_VERSION: &str = "2.20251010.01.00";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
 
-/// Endpoints the UI may call; anything else is refused.
-const ENDPOINTS: &[&str] = &["browse", "search", "next", "account/account_menu", "guide"];
+/// Endpoints the UI may call; anything else is refused. The second group acts
+/// on the account (save to a playlist, like, subscribe).
+const ENDPOINTS: &[&str] = &[
+    "browse", "search", "next", "account/account_menu", "guide",
+    "playlist/get_add_to_playlist", "browse/edit_playlist",
+    "like/like", "like/removelike", "subscription/subscribe", "subscription/unsubscribe",
+];
 
 static CLIENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
 
@@ -204,6 +209,7 @@ pub async fn yt_open_sign_in(app: AppHandle) -> Result<(), String> {
         })
         .build()
         .map_err(|e| e.to_string())?;
+    crate::set_taskbar_icon(&window);
     let handle = app.clone();
     window.on_window_event(move |e| {
         if let tauri::WindowEvent::Destroyed = e {
@@ -329,6 +335,7 @@ pub async fn yt_open_view(app: AppHandle, path: String) -> Result<(), String> {
         })
         .build()
         .map_err(|e| e.to_string())?;
+    crate::set_taskbar_icon(&window);
     let handle = app.clone();
     window.on_window_event(move |e| {
         if let tauri::WindowEvent::Destroyed = e {

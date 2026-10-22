@@ -4,7 +4,7 @@
 // Responses are deep, renderer-based JSON whose layout shifts over time, so
 // parsing walks the whole tree and recognizes item renderers wherever they are
 // instead of depending on exact paths.
-import { cacheEntry, cachePut } from "./cache";
+import { cacheDelete, cacheEntry, cachePut } from "./cache";
 import { invoke } from "./platform";
 import { settings } from "./settings";
 
@@ -68,26 +68,42 @@ export class ApiError extends Error {
 type Json = any;
 const isDemo = () => import.meta.env.DEV && new URLSearchParams(location.search).has("demo");
 
-async function yt(endpoint: string, body: Record<string, unknown>, ttl: number): Promise<Json> {
-  const key = `yt:${endpoint}:${JSON.stringify(body)}:${settings().region}`;
+const cacheKey = (endpoint: string, body: Record<string, unknown>) => `yt:${endpoint}:${JSON.stringify(body)}:${settings().region}`;
+
+/** One uncached request to YouTube's web client API. */
+async function call(endpoint: string, body: Record<string, unknown>): Promise<Json> {
+  try {
+    return await invoke<Json>("yt_api", { endpoint, body, hl: navigator.language || "en", gl: settings().region });
+  } catch (e) {
+    const msg = String(e);
+    if (msg === "signedOut") throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
+    if (msg === "offline") throw new ApiError("You're offline", 0, "offline");
+    throw new ApiError(msg, 500);
+  }
+}
+
+/**
+ * A cached request. `fresh`: always ask YouTube (feeds that should change on
+ * every launch), falling back to the cached copy only when offline.
+ */
+async function yt(endpoint: string, body: Record<string, unknown>, ttl: number, fresh = false): Promise<Json> {
+  const key = cacheKey(endpoint, body);
   if (isDemo()) {
     const { demoResponse } = await import("./demo");
     await new Promise((r) => setTimeout(r, 150 + Math.random() * 350));
     return demoResponse(endpoint, body);
   }
   const fetchFresh = async (): Promise<Json> => {
-    let res: Json;
-    try {
-      res = await invoke<Json>("yt_api", { endpoint, body, hl: navigator.language || "en", gl: settings().region });
-    } catch (e) {
-      const msg = String(e);
-      if (msg === "signedOut") throw new ApiError("Sign in with Google to start watching", 401, "signedOut");
-      if (msg === "offline") throw new ApiError("You're offline", 0, "offline");
-      throw new ApiError(msg, 500);
-    }
+    const res = await call(endpoint, body);
     cachePut(key, res);
     return res;
   };
+  if (fresh)
+    return fetchFresh().catch(async (e) => {
+      const hit = e instanceof ApiError && e.reason === "offline" ? await cacheEntry<Json>(key) : undefined;
+      if (hit) return hit.value;
+      throw e;
+    });
   const hit = await cacheEntry<Json>(key);
   if (hit && hit.age < ttl) return hit.value;
   // Stale-while-revalidate: show what we had instantly (up to a day old) and
@@ -107,6 +123,15 @@ const STALE_MAX = 24 * 60 * MIN;
 /** Text from any of YouTube's text shapes: simpleText, runs, content. */
 const tx = (x: Json): string =>
   !x ? "" : typeof x === "string" ? x : (x.simpleText ?? x.content ?? (Array.isArray(x.runs) ? x.runs.map((r: Json) => r.text).join("") : ""));
+
+/** Every value in the tree for which `pick` returns something, in document order. */
+function findAll<T>(node: Json, pick: (n: Json) => T | undefined, out: T[] = [], depth = 0): T[] {
+  if (!node || typeof node !== "object" || depth > 40) return out;
+  const hit = pick(node);
+  if (hit !== undefined) out.push(hit);
+  else for (const v of Array.isArray(node) ? node : Object.values(node)) findAll(v, pick, out, depth + 1);
+  return out;
+}
 
 /** First value in the tree for which `pick` returns something. */
 function find<T>(node: Json, pick: (n: Json) => T | undefined, depth = 0): T | undefined {
@@ -379,11 +404,13 @@ let homeAt = 0;
 /**
  * The signed-in Home feed, page by page. Each page is its own promise so the
  * first row renders as soon as page 1 arrives instead of waiting for all three.
+ * Always fetched fresh (then kept in memory for 10 minutes): serving the
+ * cached feed from the last run made every launch open on the same videos.
  */
 export function homeFeedPage(n: 0 | 1 | 2): Promise<Item[]> {
   if (!homePages || Date.now() - homeAt > 10 * MIN) {
     homeAt = Date.now();
-    const first = yt("browse", { browseId: "FEwhat_to_watch" }, 10 * MIN);
+    const first = yt("browse", { browseId: "FEwhat_to_watch" }, 0, true);
     const next = (prev: Promise<Json | null>) =>
       prev.then((r) => {
         const token = r && continuationOf(r);
@@ -479,8 +506,7 @@ export const watchLater = () => playlistVideos("WL");
 export const likedVideos = () => playlistVideos("LL");
 
 export async function myPlaylists(): Promise<Playlist[]> {
-  const pick = (r: Json) =>
-    items(r).filter((i): i is Playlist => i.kind === "playlist" && !["WL", "LL"].includes(i.id));
+  const pick = (r: Json) => items(r).filter((i): i is Playlist => i.kind === "playlist");
   const found = pick(await yt("browse", { browseId: "FEplaylist_aggregation" }, 10 * MIN).catch(() => null));
   return found.length ? dedupe(found) : dedupe(pick(await yt("browse", { browseId: "FElibrary" }, 10 * MIN)));
 }
@@ -529,13 +555,141 @@ export async function channelPlaylists(id: string): Promise<Playlist[]> {
   return dedupe(items(r).filter((i): i is Playlist => i.kind === "playlist"));
 }
 
-/** Description and related videos for the player's side panel. */
-export async function watchNext(videoId: string): Promise<{ description: string; related: Video[] }> {
+export interface WatchDetails {
+  description: string;
+  related: Video[];
+  liked: boolean;
+  /** null when YouTube didn't say (e.g. the viewer's own channel). */
+  subscribed: boolean | null;
+  subscribeParams?: string;
+  unsubscribeParams?: string;
+  commentsText: string;
+  /** Opens the comments; absent when they're turned off. */
+  commentsToken?: string;
+}
+
+/** Description, related videos, the viewer's like/subscribe state and the comments entry. */
+export async function watchNext(videoId: string): Promise<WatchDetails> {
   const r = await yt("next", { videoId }, 30 * MIN);
   const secondary = find(r, (x) => x?.videoSecondaryInfoRenderer);
   const description = tx(secondary?.attributedDescription) || tx(secondary?.description);
   const results = find(r, (x) => x?.secondaryResults) ?? {};
-  return { description, related: dedupe(videosOnly(items(results))).filter((v) => v.id !== videoId) };
+  const sub = find(r, (x) => (typeof x?.subscribeButtonRenderer?.subscribed === "boolean" ? x.subscribeButtonRenderer : undefined));
+  const subscribed: boolean | null =
+    sub?.subscribed ??
+    find(r?.frameworkUpdates, (x) => (typeof x?.subscriptionStateEntity?.subscribed === "boolean" ? x.subscriptionStateEntity.subscribed : undefined)) ??
+    null;
+  const commentSection = find(r, (x) => (x?.itemSectionRenderer?.sectionIdentifier === "comment-item-section" ? x.itemSectionRenderer : undefined));
+  return {
+    description,
+    related: dedupe(videosOnly(items(results))).filter((v) => v.id !== videoId),
+    liked: find(r, (x) => x?.likeStatusEntity?.likeStatus) === "LIKE",
+    subscribed,
+    subscribeParams: find(r, (x) => x?.subscribeEndpoint?.params),
+    unsubscribeParams: find(r, (x) => x?.unsubscribeEndpoint?.params),
+    commentsText: tx(find(r, (x) => x?.commentsEntryPointHeaderRenderer?.commentCount)),
+    commentsToken: commentSection && find(commentSection, (x) => x?.continuationCommand?.token),
+  };
+}
+
+// ---- comments -----------------------------------------------------------------------
+
+export interface Comment {
+  id: string;
+  author: string;
+  avatar: string;
+  text: string;
+  ageText: string;
+  likesText: string;
+  repliesText: string;
+}
+
+/** One page of comments, and the token for the next. */
+export async function comments(token: string): Promise<{ comments: Comment[]; next?: string }> {
+  const r = await yt("next", { continuation: token }, 10 * MIN);
+  const list: Json[] = (r?.onResponseReceivedEndpoints ?? []).flatMap(
+    (a: Json) => (a?.reloadContinuationItemsCommand ?? a?.appendContinuationItemsAction)?.continuationItems ?? [],
+  );
+  // Current responses keep each comment's content in an entity keyed by the
+  // thread's commentKey; older ones inline a commentRenderer.
+  const entities = new Map<string, Json>();
+  findAll(r?.frameworkUpdates, (x) => x?.commentEntityPayload).forEach((p: Json) => entities.set(p.key, p));
+  const out: Comment[] = [];
+  for (const thread of list.map((x) => x?.commentThreadRenderer).filter(Boolean)) {
+    const e = entities.get(thread.commentViewModel?.commentViewModel?.commentKey);
+    if (e) {
+      const replies = e.toolbar?.replyCount;
+      out.push({
+        id: e.properties?.commentId ?? e.key,
+        author: e.author?.displayName ?? "",
+        avatar: https(e.author?.avatarThumbnailUrl ?? ""),
+        text: tx(e.properties?.content),
+        ageText: e.properties?.publishedTime ?? "",
+        likesText: (e.toolbar?.likeCountNotliked ?? "").trim(),
+        repliesText: replies && replies !== "0" ? `${replies} ${replies === "1" ? "reply" : "replies"}` : "",
+      });
+      continue;
+    }
+    const c = thread.comment?.commentRenderer;
+    if (c)
+      out.push({
+        id: c.commentId,
+        author: tx(c.authorText),
+        avatar: largest(c.authorThumbnail?.thumbnails),
+        text: tx(c.contentText),
+        ageText: tx(c.publishedTimeText),
+        likesText: tx(c.voteCount),
+        repliesText: c.replyCount ? `${c.replyCount} ${c.replyCount === 1 ? "reply" : "replies"}` : "",
+      });
+  }
+  // The page's own continuation is the last item of the list (replies carry
+  // their own, nested deeper).
+  const next = list
+    .map((x) => x?.continuationItemRenderer)
+    .filter(Boolean)
+    .map((c) => find(c, (y) => y?.continuationCommand?.token) as string | undefined)
+    .pop();
+  return { comments: out.filter((c) => c.text), next };
+}
+
+// ---- account actions (save, like, subscribe) ---------------------------------------
+// Never cached; each drops the cached pages it makes stale.
+
+export interface SaveTarget {
+  playlistId: string;
+  title: string;
+  saved: boolean;
+}
+
+/** The viewer's playlists (Watch later first) and whether each holds the video. */
+export async function saveTargets(videoId: string): Promise<SaveTarget[]> {
+  const r = await call("playlist/get_add_to_playlist", { videoIds: [videoId], excludeWatchLater: false });
+  const list: SaveTarget[] = findAll(r, (x) => x?.playlistAddToOptionRenderer)
+    .filter((o: Json) => o.playlistId)
+    .map((o: Json) => ({ playlistId: o.playlistId, title: tx(o.title), saved: o.containsSelectedVideos === "ALL" }));
+  if (!list.some((t) => t.playlistId === "WL")) list.unshift({ playlistId: "WL", title: "Watch later", saved: false });
+  return list.sort((a, b) => +(b.playlistId === "WL") - +(a.playlistId === "WL"));
+}
+
+const dropPlaylist = (playlistId: string) => cacheDelete(cacheKey("browse", { browseId: `VL${playlistId}` }));
+const dropWatch = (videoId: string) => cacheDelete(cacheKey("next", { videoId }));
+
+export async function setSaved(videoId: string, playlistId: string, on: boolean): Promise<void> {
+  const action = on
+    ? { action: "ACTION_ADD_VIDEO", addedVideoId: videoId }
+    : { action: "ACTION_REMOVE_VIDEO_BY_VIDEO_ID", removedVideoId: videoId };
+  await call("browse/edit_playlist", { playlistId, actions: [action] });
+  await dropPlaylist(playlistId);
+}
+
+export async function setLiked(videoId: string, on: boolean): Promise<void> {
+  await call(on ? "like/like" : "like/removelike", { target: { videoId } });
+  await Promise.all([dropPlaylist("LL"), dropWatch(videoId)]);
+}
+
+export async function setSubscribed(channelId: string, on: boolean, videoId: string, params?: string): Promise<void> {
+  await call(on ? "subscription/subscribe" : "subscription/unsubscribe", { channelIds: [channelId], ...(params ? { params } : {}) });
+  await Promise.all([cacheDelete(cacheKey("browse", { browseId: "FEsubscriptions" })), dropWatch(videoId)]);
 }
 
 export async function account(): Promise<Account | null> {

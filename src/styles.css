@@ -1240,6 +1240,45 @@ body.rail-open .stage {
   font-size: 0.9rem;
 }
 
+/* Account actions under the title: Like, Save, Comments, Subscribe. */
+.np-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.np-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 99rem;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.np-act:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.np-act.on {
+  background: var(--fg);
+  color: #000;
+}
+
+.np-act:disabled {
+  opacity: 0.4;
+}
+
+.np-act-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
 .np-desc {
   margin-top: 1rem;
   max-height: 6.5rem;
@@ -2283,4 +2322,89 @@ html.reduced-motion .tut-ring,
 html.reduced-motion .tut-arrow,
 html.reduced-motion .tut-card {
   transition: none;
+}
+
+/* ---- player drawers: comments, save to playlist --------------------------------- */
+
+.cm-list {
+  flex: 1;
+}
+
+.cm-item {
+  display: flex;
+  gap: 0.9rem;
+  padding: 0.9rem 1.4rem;
+  border-radius: 0.8rem;
+  transition: background 0.15s;
+}
+
+.cm-item.focused {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.cm-avatar {
+  flex: none;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--faint);
+}
+
+.cm-body {
+  min-width: 0;
+}
+
+.cm-head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+
+.cm-author {
+  font-weight: 700;
+}
+
+.cm-age {
+  color: var(--muted);
+}
+
+.cm-text {
+  margin: 0.3rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.cm-foot {
+  display: flex;
+  gap: 1.1rem;
+  margin-top: 0.45rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.cm-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cm-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.save-row .s-value .icon {
+  width: 1.3rem;
+  height: 1.3rem;
+  opacity: 0.55;
+}
+
+.save-row.on .s-value .icon {
+  opacity: 1;
 }

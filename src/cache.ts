@@ -69,6 +69,16 @@ export async function cachePut(key: string, value: unknown): Promise<void> {
   }
 }
 
+export async function cacheDelete(key: string): Promise<void> {
+  mem.delete(key);
+  const d = await db();
+  try {
+    d?.transaction("r", "readwrite").objectStore("r").delete(key);
+  } catch {
+    /* closed: the entry just ages out */
+  }
+}
+
 export async function cacheClear(): Promise<void> {
   mem.clear();
   const d = await db();

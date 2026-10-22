@@ -3,7 +3,7 @@
 // screens the 16:9 video leaves pillarbox space, which hosts the info / up-next
 // panel instead. Controller input drives the player through its public JS API.
 import * as api from "../api";
-import { decodeEntities, fmtDuration, h } from "../dom";
+import { decodeEntities, fmtDuration, h, icon } from "../dom";
 import { pointerIsActive, type ActionEvent } from "../input";
 import { flip } from "../motion";
 import { isFullscreen, isTauri, listen, openYouTube, setFullscreen } from "../platform";
@@ -12,6 +12,7 @@ import { openChannel } from "../routes";
 import { settings, updateSettings, type Settings } from "../settings";
 import { cue } from "../sound";
 import { setBackdrop, toast } from "../ui/chrome";
+import { openComments, openSaveTo } from "../ui/watchpanels";
 
 declare global {
   interface Window {
@@ -192,12 +193,20 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   const bar = h("div.np-bar", null, barFill);
   const stateEl = h("div.np-state");
   const queueEl = h("div.queue", { "data-native-scroll": true });
+  // The viewer's account actions for the current video (also in the ☰ menu).
+  const actBtn = (name: Parameters<typeof icon>[0], run: () => void) =>
+    h("button.np-act", { onclick: run }, icon(name, "icon np-act-icon"), h("span"));
+  const likeBtn = actBtn("like", () => toggleLike());
+  const saveBtn = actBtn("add", () => openSaveTo(current));
+  const commentsBtn = actBtn("comments", () => showComments());
+  const subBtn = actBtn("subscribe", () => toggleSubscribe());
+  const actionsEl = h("div.np-actions", null, likeBtn, saveBtn, commentsBtn, subBtn);
   // Each hint is unbreakable, so narrow panels wrap between hints, not inside them.
   const hints = (items: string[]) => h("div.legend-line", null, ...items.map((t) => h("span", null, t)));
   const legend = h(
     "div.legend",
     null,
-    hints(["Ⓐ play/pause", "◀ ▶ seek", "▲ ▼ volume", "LB/RB prev/next", "Ⓨ layout", "☰ settings", "⧉ channel", "Ⓑ back"]),
+    hints(["Ⓐ play/pause", "◀ ▶ seek", "▲ ▼ volume", "LB/RB prev/next", "Ⓨ layout", "☰ menu · save · comments", "⧉ channel", "Ⓑ back"]),
     hints(["Keyboard:", "Space/K play", "J L seek", "M mute", "C captions", "S settings", "Esc back"]),
   );
   const panel = h(
@@ -207,6 +216,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     titleEl,
     channelBtn,
     lineEl,
+    actionsEl,
     descEl,
     h("h3.queue-title", null, "Up next"),
     queueEl,
@@ -342,6 +352,60 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
 
   const onResize = () => sizeVideo();
 
+  // ---- account actions -----------------------------------------------------------
+  /** From YouTube's watch page for `current`; null until it arrives. */
+  let details: api.WatchDetails | null = null;
+  let liked = false;
+  let subscribed: boolean | null = null;
+
+  function syncActions() {
+    const set = (b: HTMLElement, label: string, on: boolean, disabled = false) => {
+      b.querySelector("span")!.textContent = label;
+      b.classList.toggle("on", on);
+      (b as HTMLButtonElement).disabled = disabled;
+    };
+    set(likeBtn, liked ? "Liked" : "Like", liked);
+    set(saveBtn, "Save", false);
+    set(commentsBtn, details?.commentsText ? `Comments · ${details.commentsText}` : "Comments", false, !!details && !details.commentsToken);
+    set(subBtn, subscribed ? "Subscribed" : "Subscribe", !!subscribed, !current.channelId || subscribed === null);
+  }
+
+  async function toggleLike() {
+    const v = current;
+    const on = !liked;
+    liked = on;
+    syncActions();
+    cue(on ? "toggleOn" : "toggleOff");
+    try {
+      await api.setLiked(v.id, on);
+      toast(on ? "Added to Liked videos" : "Removed from Liked videos", "success");
+    } catch (e) {
+      if (current.id === v.id) ((liked = !on), syncActions());
+      toast(`Couldn't update the like: ${e instanceof Error ? e.message : e}`, "error", 5000);
+    }
+  }
+
+  async function toggleSubscribe() {
+    const v = current;
+    if (!v.channelId || subscribed === null) return;
+    const on = !subscribed;
+    subscribed = on;
+    syncActions();
+    cue(on ? "toggleOn" : "toggleOff");
+    try {
+      await api.setSubscribed(v.channelId, on, v.id, on ? details?.subscribeParams : details?.unsubscribeParams);
+      toast(on ? `Subscribed to ${v.channelTitle}` : `Unsubscribed from ${v.channelTitle}`, "success");
+    } catch (e) {
+      if (current.id === v.id) ((subscribed = !on), syncActions());
+      toast(`Couldn't update the subscription: ${e instanceof Error ? e.message : e}`, "error", 5000);
+    }
+  }
+
+  function showComments() {
+    if (details?.commentsToken) openComments(details.commentsToken, details.commentsText);
+    else toast(details ? "Comments are turned off for this video" : "Comments are still loading");
+  }
+
   // ---- now playing ---------------------------------------------------------------
   function renderInfo() {
     titleEl.textContent = decodeEntities(current.title);
@@ -351,6 +415,10 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     descEl.scrollTop = 0;
     ambient.style.backgroundImage = `url("${current.thumb}")`;
     setBackdrop(null);
+    details = null;
+    liked = false;
+    subscribed = null;
+    syncActions();
     renderQueue();
     loadDetails(current);
   }
@@ -359,8 +427,13 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   function loadDetails(v: api.Video) {
     api
       .watchNext(v.id)
-      .then(({ description, related }) => {
+      .then((d) => {
         if (destroyed || current.id !== v.id) return;
+        const { description, related } = d;
+        details = d;
+        liked = d.liked;
+        subscribed = d.subscribed;
+        syncActions();
         if (description) descEl.textContent = description;
         const known = new Set(queue.map((q) => q.id));
         const fresh = related.filter((r) => !known.has(r.id));
@@ -416,7 +489,34 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   function openPlaybackSettings() {
     let idx = 0;
     const rate = () => player?.getPlaybackRate?.() ?? 1;
+    const leave = (run: () => void) => () => {
+      router.closeOverlay();
+      run();
+    };
     const rows: { label: string; value?: () => string; help: string; select?: () => void; adjust?: (d: 1 | -1) => void }[] = [
+      {
+        label: "Save to playlist",
+        help: "Save this video to Watch later or one of your playlists, or remove it.",
+        select: leave(() => openSaveTo(current)),
+      },
+      {
+        label: "Like",
+        value: () => (liked ? "Liked" : "—"),
+        help: "Like this video. It shows up in Liked videos in your Library.",
+        select: () => void toggleLike(),
+      },
+      {
+        label: "Comments",
+        value: () => details?.commentsText ?? "",
+        help: "Read what people are saying about this video.",
+        select: leave(showComments),
+      },
+      {
+        label: "Subscribe",
+        value: () => (subscribed === null ? "" : subscribed ? "Subscribed" : "—"),
+        help: `Subscribe to ${current.channelTitle || "this channel"}. New uploads appear in Subscriptions and on Home.`,
+        select: () => void toggleSubscribe(),
+      },
       {
         label: "Captions",
         value: () => (captionsOn ? "On" : "Off"),
@@ -561,7 +661,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
           if (ev.target === el) router.closeOverlay();
         },
       },
-      h("div.ps-panel", null, h("h2", null, "Playback"), list, help, h("p.te-legend", null, "Ⓐ select   ◀ ▶ change   Ⓑ / ☰ close   ·   Mouse: click, or click outside to close")),
+      h("div.ps-panel", null, h("h2", null, "Video"), list, help, h("p.te-legend", null, "Ⓐ select   ◀ ▶ change   Ⓑ / ☰ close   ·   Mouse: click, or click outside to close")),
     );
     sync();
     // Values like quality and speed settle a moment after a change.

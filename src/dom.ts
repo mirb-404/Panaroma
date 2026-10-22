@@ -25,26 +25,40 @@ export function icon(name: keyof typeof ICONS, cls = "icon"): SVGSVGElement {
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("class", cls);
   svg.setAttribute("aria-hidden", "true");
-  svg.innerHTML = ICONS[name];
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", ICONS[name]);
+  path.setAttribute("fill", "currentColor");
+  path.setAttribute("fill-rule", "evenodd");
+  svg.append(path);
   return svg;
 }
 
+/** Panorama's own solid glyphs (24×24, one even-odd path each: cut-outs are holes). */
 const ICONS = {
-  home: '<path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z" fill="currentColor"/>',
-  subs: '<path d="M4 6h16M6 3h12M3 9h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m10 12 5 3-5 3z" fill="currentColor"/>',
-  search: '<circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-  library: '<path d="M4 4h3v16H4zM9.5 4h3v16h-3z" fill="currentColor"/><path d="m15 5.2 2.9-.8 3.6 15-2.9.8z" fill="currentColor"/>',
-  settings: '<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4 1 2-3.4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
-  play: '<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>',
-  backspace: '<path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m12 9 6 6m0-6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-  space: '<path d="M4 10v4h16v-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-  pad: '<path d="M7 7h10a5 5 0 0 1 4.9 6l-.8 4a2.5 2.5 0 0 1-4.3 1.2L14.5 16h-5l-2.3 2.2A2.5 2.5 0 0 1 2.9 17l-.8-4A5 5 0 0 1 7 7z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 10v4M5 12h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="16" cy="11" r="1.1" fill="currentColor"/><circle cx="18" cy="13" r="1.1" fill="currentColor"/>',
-  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 9.5h.01M9 9.5h.01M12 9.5h.01M15 9.5h.01M18 9.5h.01M6 12.5h.01M18 12.5h.01M8 15h8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
-  mouse: '<rect x="6" y="3" width="12" height="18" rx="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v3.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
-  back: '<path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
-  next: '<path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
-  user: '<circle cx="12" cy="8" r="4" fill="currentColor"/><path d="M4 21a8 8 0 0 1 16 0z" fill="currentColor"/>',
-  external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  home: "M12 2.5 2 11h3v10h5.5v-6.5h3V21H19V11h3z",
+  subs: "M6 2.5h12v2H6zM4 6h16v2H4zM2 9.5h20v12H2zm8 2.8v6.4l5.4-3.2z",
+  search: "M10.5 2a8.5 8.5 0 0 1 6.8 13.6l4.8 4.8-1.8 1.8-4.8-4.8A8.5 8.5 0 1 1 10.5 2zm0 2.6a5.9 5.9 0 1 0 0 11.8 5.9 5.9 0 0 0 0-11.8z",
+  library: "M3.5 4h3.5v16H3.5zM9 4h3.5v16H9zM14.6 5.3l3.4-.9 3.8 15.2-3.4.9z",
+  settings:
+    "M10 2h4l.6 2.9 1.6.9 2.8-1 2 3.4-2.2 2a6.6 6.6 0 0 1 0 1.8l2.2 2-2 3.4-2.8-1-1.6.9L14 22h-4l-.6-2.9-1.6-.9-2.8 1-2-3.4 2.2-2a6.6 6.6 0 0 1 0-1.8l-2.2-2 2-3.4 2.8 1 1.6-.9zm2 6.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8z",
+  play: "M7.5 4.5v15L20 12z",
+  backspace:
+    "M8.5 4H21a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H8.5L2 12zm6.1 6.8-1.8-1.8-1.2 1.2 1.8 1.8-1.8 1.8 1.2 1.2 1.8-1.8 1.8 1.8 1.2-1.2-1.8-1.8 1.8-1.8-1.2-1.2z",
+  space: "M3 8.5h2.2v4.3h13.6V8.5H21v6.7H3z",
+  pad:
+    "M7 6h10a5 5 0 0 1 4.9 6l-.9 4.6a2.6 2.6 0 0 1-4.5 1.3l-2.1-2.4H9.6l-2.1 2.4A2.6 2.6 0 0 1 3 16.6L2.1 12A5 5 0 0 1 7 6zm-.8 3v1.6H4.6v1.6h1.6v1.6h1.6v-1.6h1.6v-1.6H7.8V9zM16 8.9a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm2.3 2.3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z",
+  keyboard:
+    "M4 5.5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zM5 8.5v2h2v-2zm3.5 0v2h2v-2zm3.5 0v2h2v-2zm3.5 0v2h2v-2zM5 12v2h2v-2zm12 0v2h2v-2zm-9 3v1.6h8V15zm9.5-6.5v2h1.5v-2z",
+  mouse: "M12 2.5a6 6 0 0 1 6 6v7a6 6 0 0 1-12 0v-7a6 6 0 0 1 6-6zM11.1 6v4.5h1.8V6z",
+  back: "M15.6 3.4l2.1 2.1-6.5 6.5 6.5 6.5-2.1 2.1L7 12z",
+  next: "M8.4 3.4 6.3 5.5l6.5 6.5-6.5 6.5 2.1 2.1L17 12z",
+  user: "M12 3.5a4.3 4.3 0 1 1 0 8.6 4.3 4.3 0 0 1 0-8.6zM3.5 21a8.5 8.5 0 0 1 17 0z",
+  external: "M4 5h7v2.2H6.2v10.6h10.6V13H19v7H4zM13 3h8v8h-2.2V6.8l-7.1 7.1-1.6-1.6 7.1-7.1H13z",
+  like: "M2 10h4v11H2zm6 .2 4.6-6.7c.9-.9 2.6-.3 2.6 1.1 0 .3 0 .5-.1.8l-.9 4.1H20a2 2 0 0 1 2 2.2l-1 7.5a2.2 2.2 0 0 1-2.2 1.8H8z",
+  comments: "M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+  add: "M10.8 4h2.4v6.8H20v2.4h-6.8V20h-2.4v-6.8H4v-2.4h6.8z",
+  check: "M9.2 15.6 4.9 11.3 3.2 13l6 6L21 7.2l-1.7-1.7z",
+  subscribe: "M12 2.5A1.5 1.5 0 0 1 13.5 4v.7a6 6 0 0 1 4.5 5.8V16l2 2v1H4v-1l2-2v-5.5a6 6 0 0 1 4.5-5.8V4A1.5 1.5 0 0 1 12 2.5zm-2.2 17.7h4.4a2.2 2.2 0 0 1-4.4 0z",
 } as const;
 
 // ---- formatting -----------------------------------------------------------------

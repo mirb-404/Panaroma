@@ -41,6 +41,36 @@ fn app_ready(window: WebviewWindow) {
     let _ = window.set_focus();
 }
 
+/// Gives a window the large (taskbar / Alt+Tab) icon from the exe's resources.
+/// Tauri only sets the small icon and leaves the window class without one, so
+/// once Windows re-reads the window's icon (after fullscreen toggles, explorer
+/// refreshes, …) the taskbar button went blank.
+pub(crate) fn set_taskbar_icon(window: &WebviewWindow) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetSystemMetrics, LoadImageW, SendMessageW, SetClassLongPtrW, GCLP_HICON, ICON_BIG, IMAGE_ICON, LR_SHARED,
+            SM_CXICON, SM_CYICON, WM_SETICON,
+        };
+        let Ok(hwnd) = window.hwnd() else { return };
+        let hwnd = hwnd.0 as _;
+        // SAFETY: plain Win32 calls on a live window handle. LR_SHARED icons are
+        // owned by the system and stay valid for the process's lifetime.
+        unsafe {
+            let id = tauri::utils::platform::WINDOWS_APP_ICON_RESOURCE_ID as usize as *const u16;
+            let icon = LoadImageW(GetModuleHandleW(std::ptr::null()), id, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED);
+            if icon.is_null() {
+                return;
+            }
+            SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, icon as isize);
+            SetClassLongPtrW(hwnd, GCLP_HICON, icon as isize);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
 #[tauri::command]
 fn set_fullscreen(window: WebviewWindow, on: bool) -> bool {
     let _ = window.set_fullscreen(on);
@@ -106,6 +136,7 @@ pub fn run() {
                     same
                 })
                 .build()?;
+            set_taskbar_icon(&window);
 
             let focused = Arc::new(AtomicBool::new(true));
             let f = focused.clone();
