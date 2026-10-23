@@ -1,7 +1,7 @@
 {
   "name": "panorama",
   "private": true,
-  "version": "3.5.0",
+  "version": "3.6.0",
   "description": "A lean-back, controller-first YouTube client for ultrawide displays",
   "author": "Mirang Bhandari",
   "license": "GPL-3.0-or-later",
