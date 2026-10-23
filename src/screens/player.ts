@@ -675,7 +675,10 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   }
 
   const zones = (): Zone[] =>
-    tab !== "next" ? ["tabs", "list"] : ["channel", "actions", ...(descEl.textContent ? ["desc" as const] : []), "tabs", "list"];
+    tab !== "next"
+      ? ["tabs", "list"]
+      : // The description only when it's there and on screen (short windows hide it).
+        ["channel", "actions", ...(descEl.textContent && descEl.offsetParent ? ["desc" as const] : []), "tabs", "list"];
   function moveZone(d: 1 | -1) {
     const zs = zones();
     const i = Math.max(0, Math.min(zs.length - 1, zs.indexOf(zone) + d));

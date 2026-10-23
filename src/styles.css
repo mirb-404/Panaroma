@@ -1222,6 +1222,12 @@ body.immersive .browse-refresh {
   transition: opacity 0.35s var(--ease), transform 0.4s var(--ease);
 }
 
+/* Nothing in the panel is squeezed: only the description card and the list
+   below the tabs (both further down) give up height on short screens. */
+.np-panel > * {
+  flex-shrink: 0;
+}
+
 [data-layout="theater"] .np-panel {
   opacity: 0;
   transform: translateX(3rem);
@@ -1359,7 +1365,8 @@ body.immersive .browse-refresh {
 }
 
 .np-title {
-  font-size: 1.6rem;
+  /* Scales with the screen's height, so short windows keep room for the rest. */
+  font-size: clamp(1.15rem, 2.9vh, 1.6rem);
   font-weight: 700;
   line-height: 1.25;
   display: -webkit-box;
@@ -1547,9 +1554,10 @@ body.immersive .browse-refresh {
 .np-desc-card {
   display: flex;
   flex-direction: column;
-  /* On short screens the card gives up height before Up next does. */
+  /* On short screens the card gives up height before Up next does, but never
+     shrinks to a sliver: views, a line of text and "Show more" stay. */
   flex: 0 1 auto;
-  min-height: 0;
+  min-height: 5.6rem;
   overflow: hidden;
   margin-top: 1rem;
   padding: 0.75rem 0.9rem;
@@ -1631,6 +1639,27 @@ body.immersive .browse-refresh {
   }
 }
 
+/* Very short windows: tighter spacing, and the description gives way entirely. */
+@media (max-height: 760px) {
+  .np-panel {
+    padding-top: 1.4rem;
+    padding-bottom: 1rem;
+  }
+
+  .np-now {
+    margin-bottom: 0.9rem;
+    padding-bottom: 0.8rem;
+  }
+
+  .np-desc-card {
+    display: none;
+  }
+
+  .np-tabs {
+    margin-top: 0.9rem;
+  }
+}
+
 .feed-takeover .np-title {
   -webkit-line-clamp: 1;
   font-size: 1.2rem;
@@ -1701,7 +1730,7 @@ body.immersive .browse-refresh {
 .np-body {
   flex: 1;
   /* Always room for a few Up next rows, however much sits above. */
-  min-height: min(16rem, 40vh);
+  min-height: min(13rem, 32vh);
   display: flex;
   flex-direction: column;
 }
