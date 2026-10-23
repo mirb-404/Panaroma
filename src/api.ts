@@ -566,6 +566,12 @@ export interface WatchDetails {
   commentsText: string;
   /** Opens the comments; absent when they're turned off. */
   commentsToken?: string;
+  /** Streaming right now (not a finished stream's replay). */
+  live: boolean;
+  /** "1,234 watching now" while live, else YouTube's view count. */
+  viewersText: string;
+  /** Live chat, or a finished stream's chat replay; absent when there's none. */
+  chat?: ChatSource;
 }
 
 /** Description, related videos, the viewer's like/subscribe state and the comments entry. */
@@ -580,7 +586,13 @@ export async function watchNext(videoId: string): Promise<WatchDetails> {
     find(r?.frameworkUpdates, (x) => (typeof x?.subscriptionStateEntity?.subscribed === "boolean" ? x.subscriptionStateEntity.subscribed : undefined)) ??
     null;
   const commentSection = find(r, (x) => (x?.itemSectionRenderer?.sectionIdentifier === "comment-item-section" ? x.itemSectionRenderer : undefined));
+  const views = find(r, (x) => x?.videoViewCountRenderer);
+  const chat = find(r, (x) => x?.liveChatRenderer);
+  const chatToken: string | undefined = chat && find(chat.continuations, (x) => x?.continuation);
   return {
+    live: !!views?.isLive,
+    viewersText: tx(views?.viewCount) || tx(views?.shortViewCount),
+    chat: chatToken ? { token: chatToken, replay: !!chat.isReplay } : undefined,
     description,
     related: dedupe(videosOnly(items(results))).filter((v) => v.id !== videoId),
     liked: find(r, (x) => x?.likeStatusEntity?.likeStatus) === "LIKE",
@@ -602,21 +614,29 @@ export interface Comment {
   ageText: string;
   likesText: string;
   repliesText: string;
+  /** Loads this comment's replies (through `comments`); absent when it has none. */
+  repliesToken?: string;
 }
 
-/** One page of comments, and the token for the next. */
+/**
+ * One page of comments, and the token for the next. Also takes a comment's
+ * `repliesToken`: a page of replies has the same shape, without threads.
+ */
 export async function comments(token: string): Promise<{ comments: Comment[]; next?: string }> {
   const r = await yt("next", { continuation: token }, 10 * MIN);
   const list: Json[] = (r?.onResponseReceivedEndpoints ?? []).flatMap(
     (a: Json) => (a?.reloadContinuationItemsCommand ?? a?.appendContinuationItemsAction)?.continuationItems ?? [],
   );
   // Current responses keep each comment's content in an entity keyed by the
-  // thread's commentKey; older ones inline a commentRenderer.
+  // comment's commentKey; older ones inline a commentRenderer.
   const entities = new Map<string, Json>();
   findAll(r?.frameworkUpdates, (x) => x?.commentEntityPayload).forEach((p: Json) => entities.set(p.key, p));
   const out: Comment[] = [];
-  for (const thread of list.map((x) => x?.commentThreadRenderer).filter(Boolean)) {
-    const e = entities.get(thread.commentViewModel?.commentViewModel?.commentKey);
+  for (const item of list) {
+    // Top-level comments come as threads (with their replies' token); replies bare.
+    const thread = item?.commentThreadRenderer;
+    const repliesToken: string | undefined = thread?.replies && find(thread.replies, (x) => x?.continuationCommand?.token);
+    const e = entities.get((thread?.commentViewModel ?? item)?.commentViewModel?.commentKey);
     if (e) {
       const replies = e.toolbar?.replyCount;
       out.push({
@@ -627,10 +647,11 @@ export async function comments(token: string): Promise<{ comments: Comment[]; ne
         ageText: e.properties?.publishedTime ?? "",
         likesText: (e.toolbar?.likeCountNotliked ?? "").trim(),
         repliesText: replies && replies !== "0" ? `${replies} ${replies === "1" ? "reply" : "replies"}` : "",
+        repliesToken,
       });
       continue;
     }
-    const c = thread.comment?.commentRenderer;
+    const c = thread?.comment?.commentRenderer ?? item?.commentRenderer;
     if (c)
       out.push({
         id: c.commentId,
@@ -640,6 +661,7 @@ export async function comments(token: string): Promise<{ comments: Comment[]; ne
         ageText: tx(c.publishedTimeText),
         likesText: tx(c.voteCount),
         repliesText: c.replyCount ? `${c.replyCount} ${c.replyCount === 1 ? "reply" : "replies"}` : "",
+        repliesToken,
       });
   }
   // The page's own continuation is the last item of the list (replies carry
@@ -650,6 +672,119 @@ export async function comments(token: string): Promise<{ comments: Comment[]; ne
     .map((c) => find(c, (y) => y?.continuationCommand?.token) as string | undefined)
     .pop();
   return { comments: out.filter((c) => c.text), next };
+}
+
+// ---- live chat ---------------------------------------------------------------------
+
+export interface ChatSource {
+  token: string;
+  /** A finished stream: messages replay in step with the video. */
+  replay: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  author: string;
+  avatar: string;
+  text: string;
+  /** Super Chats and Super Stickers: "$5.00". */
+  amount: string;
+  kind: "text" | "paid" | "member" | "system";
+  /** Replay only: when in the video it was sent. */
+  offsetMs: number;
+}
+
+export interface ChatPage {
+  messages: ChatMessage[];
+  /** Ids of messages a moderator removed. */
+  deleted: string[];
+  pinned?: ChatMessage;
+  next?: string;
+  /** Replay only: restarts the replay at a new position. */
+  seek?: string;
+  /** How long YouTube asks to wait before the next request. */
+  waitMs: number;
+  /** Sends a message as the viewer; absent when they can't chat. */
+  sendParams?: string;
+}
+
+/** Emoji come as their own runs: standard ones as the character, custom ones as :shortcut:. */
+const chatText = (x: Json): string =>
+  Array.isArray(x?.runs)
+    ? x.runs.map((r: Json) => r.text ?? (r.emoji?.isCustomEmoji ? (r.emoji.shortcuts?.[0] ?? "") : (r.emoji?.emojiId ?? ""))).join("")
+    : tx(x);
+
+function chatMessage(item: Json, offsetMs: number): ChatMessage | null {
+  const r =
+    item?.liveChatTextMessageRenderer ??
+    item?.liveChatPaidMessageRenderer ??
+    item?.liveChatPaidStickerRenderer ??
+    item?.liveChatMembershipItemRenderer ??
+    item?.liveChatViewerEngagementMessageRenderer;
+  if (!r?.id) return null;
+  const kind: ChatMessage["kind"] = item.liveChatTextMessageRenderer
+    ? "text"
+    : item.liveChatMembershipItemRenderer
+      ? "member"
+      : item.liveChatViewerEngagementMessageRenderer
+        ? "system"
+        : "paid";
+  const text = chatText(r.message) || (kind === "member" ? chatText(r.headerSubtext) : "");
+  if (!text && kind !== "paid") return null;
+  return {
+    id: r.id,
+    author: tx(r.authorName),
+    avatar: largest(r.authorPhoto?.thumbnails),
+    text,
+    amount: tx(r.purchaseAmountText),
+    kind,
+    offsetMs,
+  };
+}
+
+/**
+ * One poll of a live chat, or the next stretch of a chat replay. Replays take
+ * the player's position, so they return the messages from there on.
+ */
+export async function liveChat(source: ChatSource, token: string, positionMs = 0): Promise<ChatPage> {
+  const body: Record<string, unknown> = { continuation: token };
+  if (source.replay) body.currentPlayerState = { playerOffsetMs: String(Math.max(0, Math.floor(positionMs))) };
+  const r = await call(source.replay ? "live_chat/get_live_chat_replay" : "live_chat/get_live_chat", body);
+  const c = r?.continuationContents?.liveChatContinuation ?? {};
+  const page: ChatPage = { messages: [], deleted: [], waitMs: 5000 };
+  const add = (a: Json, offsetMs: number) => {
+    const m = chatMessage(a?.addChatItemAction?.item, offsetMs);
+    if (m) page.messages.push(m);
+    const gone = a?.markChatItemAsDeletedAction?.targetItemId ?? a?.markChatItemsByAuthorAsDeletedAction?.targetItemId;
+    if (gone) page.deleted.push(gone);
+    const banner = a?.addBannerToLiveChatCommand?.bannerRenderer?.liveChatBannerRenderer?.contents;
+    const pinned = banner && chatMessage(banner, offsetMs);
+    if (pinned) page.pinned = pinned;
+  };
+  for (const a of c.actions ?? []) {
+    const replay = a?.replayChatItemAction;
+    if (replay) for (const inner of replay.actions ?? []) add(inner, Number(replay.videoOffsetTimeMsec) || 0);
+    else add(a, 0);
+  }
+  for (const k of c.continuations ?? []) {
+    if (k.playerSeekContinuationData) page.seek = k.playerSeekContinuationData.continuation;
+    else {
+      const d = k.invalidationContinuationData ?? k.timedContinuationData ?? k.liveChatReplayContinuationData ?? k.reloadContinuationData;
+      if (d?.continuation) page.next = d.continuation;
+      if (d?.timeoutMs) page.waitMs = Number(d.timeoutMs);
+    }
+  }
+  page.sendParams = find(c.actionPanel, (x) => x?.sendLiveChatMessageEndpoint?.params);
+  return page;
+}
+
+/** Posts a message to a live chat as the signed-in viewer. */
+export async function sendChat(params: string, text: string): Promise<void> {
+  await call("live_chat/send_message", {
+    params,
+    clientMessageId: `pn${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    richMessage: { textSegments: [{ text }] },
+  });
 }
 
 // ---- account actions (save, like, subscribe) ---------------------------------------

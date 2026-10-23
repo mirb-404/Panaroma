@@ -9,6 +9,7 @@ export type Action =
   | "search" | "info" | "alt"
   | "prevTab" | "nextTab"
   | "rewind" | "forward"
+  | "panel"
   | "fullscreen";
 
 export interface ActionEvent {
@@ -87,6 +88,7 @@ const KEYS: Record<string, Action> = {
   BrowserBack: "back",
   GoBack: "back",
   F11: "fullscreen",
+  Tab: "panel",
   "/": "search",
   "[": "prevTab",
   "]": "nextTab",
@@ -197,6 +199,7 @@ const PAD: Record<string, Action> = {
   RB: "nextTab",
   LT: "rewind",
   RT: "forward",
+  LS: "panel",
   RS: "fullscreen",
 };
 
@@ -212,6 +215,7 @@ const STANDARD: Record<number, string> = {
   7: "RT",
   8: "View",
   9: "Menu",
+  10: "LS",
   11: "RS",
   12: "Up",
   13: "Down",

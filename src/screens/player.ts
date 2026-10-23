@@ -12,7 +12,7 @@ import { openChannel } from "../routes";
 import { settings, updateSettings, type Settings } from "../settings";
 import { cue } from "../sound";
 import { setBackdrop, toast } from "../ui/chrome";
-import { openComments, openSaveTo } from "../ui/watchpanels";
+import { chatFeed, commentsFeed, openChat, openComments, openSaveTo, type Feed } from "../ui/watchpanels";
 
 declare global {
   interface Window {
@@ -109,6 +109,10 @@ const enum State {
 }
 
 type Layout = "split" | "theater";
+/** Side panel parts, top to bottom, that take focus from the keyboard or controller. */
+type Zone = "channel" | "actions" | "desc" | "tabs" | "list";
+/** What the bottom of the side panel shows. */
+type Tab = "next" | "comments" | "chat";
 
 /**
  * `handoff`: a preview player that is already playing this video. It is moved
@@ -120,7 +124,13 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   let current = queue[pos];
   let player: any = null;
   let state = -1;
-  let focus: "video" | "queue" = "video";
+  /** "panel": the keyboard or controller moves through the side panel (Tab / LS). */
+  let focus: "video" | "panel" = "video";
+  let zone: Zone = "actions";
+  let actIdx = 0;
+  let tab: Tab = "next";
+  /** Comments or chat in the side panel, while that tab shows. */
+  let feed: Feed | null = null;
   let qIdx = pos;
   let pendingSeek: number | null = null;
   let seekCommit = 0;
@@ -187,7 +197,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   const titleEl = h("h1.np-title");
   const lineEl = h("div.np-line");
   const channelBtn = h("button.np-channel", { onclick: () => openChannel(current.channelId) });
-  const descEl = h("p.np-desc", { "data-native-scroll": true });
+  // Click (or Ⓐ), or "Show more description", opens the description up; the wheel or ▲ ▼ scroll it.
+  const descEl = h("p.np-desc", { "data-native-scroll": true, onclick: () => toggleDesc() });
+  const descMore = h("button.np-desc-more", { hidden: true, onclick: () => toggleDesc() });
   const timeEl = h("div.np-time");
   const barFill = h("div.np-bar-fill");
   const bar = h("div.np-bar", null, barFill);
@@ -198,16 +210,19 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     h("button.np-act", { onclick: run }, icon(name, "icon np-act-icon"), h("span"));
   const likeBtn = actBtn("like", () => toggleLike());
   const saveBtn = actBtn("add", () => openSaveTo(current));
-  const commentsBtn = actBtn("comments", () => showComments());
+  const commentsBtn = actBtn("comments", () => showComments(focus === "panel"));
   const subBtn = actBtn("subscribe", () => toggleSubscribe());
-  const actionsEl = h("div.np-actions", null, likeBtn, saveBtn, commentsBtn, subBtn);
+  const actButtons = [likeBtn, saveBtn, commentsBtn, subBtn];
+  const actionsEl = h("div.np-actions", null, ...actButtons);
+  const tabsEl = h("div.np-tabs");
+  const bodyEl = h("div.np-body", null, queueEl);
   // Each hint is unbreakable, so narrow panels wrap between hints, not inside them.
   const hints = (items: string[]) => h("div.legend-line", null, ...items.map((t) => h("span", null, t)));
   const legend = h(
     "div.legend",
     null,
-    hints(["Ⓐ play/pause", "◀ ▶ seek", "▲ ▼ volume", "LB/RB prev/next", "Ⓨ layout", "☰ menu · save · comments", "⧉ channel", "Ⓑ back"]),
-    hints(["Keyboard:", "Space/K play", "J L seek", "M mute", "C captions", "S settings", "Esc back"]),
+    hints(["Ⓐ play/pause", "◀ ▶ seek", "▲ ▼ volume", "LB/RB prev/next", "Ⓨ layout", "LS click panel", "☰ menu", "⧉ channel", "Ⓑ back"]),
+    hints(["Keyboard:", "Space/K play", "J L seek", "M mute", "C captions", "Tab panel", "S settings", "Esc back"]),
   );
   const panel = h(
     "aside.np-panel",
@@ -218,8 +233,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     lineEl,
     actionsEl,
     descEl,
-    h("h3.queue-title", null, "Up next"),
-    queueEl,
+    descMore,
+    tabsEl,
+    bodyEl,
     legend,
   );
   const el = h("section.screen.player-screen", null, ambient, h("div.player-stage", null, videoBox, panel), osd);
@@ -265,6 +281,20 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     // Rows of the player cropped off the top and bottom of the screen.
     cropInset = Math.max(0, (Math.round(hgt) - H) / 2);
     if (hooked) hookEmbed();
+    syncDescMore();
+  }
+
+  /** "Show more description" only when the collapsed description is cut off. */
+  function syncDescMore() {
+    const open = descEl.classList.contains("expanded");
+    descMore.textContent = open ? "Show less" : "Show more description";
+    descMore.hidden = !open && descEl.scrollHeight <= descEl.clientHeight + 1;
+  }
+
+  function toggleDesc(open = !descEl.classList.contains("expanded")) {
+    descEl.classList.toggle("expanded", open);
+    if (!open) descEl.scrollTop = 0;
+    syncDescMore();
   }
 
   // ---- embed hook (desktop app) ---------------------------------------------------
@@ -345,7 +375,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     const from = videoBox.getBoundingClientRect();
     layout = l;
     el.dataset.layout = l;
-    if (l === "theater" && focus === "queue") setFocus("video");
+    if (l === "theater" && focus === "panel") setFocus("video");
     sizeVideo();
     flip(videoBox, from);
   }
@@ -401,9 +431,35 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     }
   }
 
-  function showComments() {
-    if (details?.commentsToken) openComments(details.commentsToken, details.commentsText);
-    else toast(details ? "Comments are turned off for this video" : "Comments are still loading");
+  /** Side panel showing: comments and chat open in it, else in a drawer. */
+  const panelShown = () => layout === "split" && !mini;
+  const positionMs = () => (player?.getCurrentTime?.() ?? 0) * 1000;
+
+  /** `focusIt`: move keyboard / controller focus onto them (side panel only). */
+  function showComments(focusIt: boolean) {
+    if (!details?.commentsToken) {
+      toast(details ? "Comments are turned off for this video" : "Comments are still loading");
+      return;
+    }
+    if (!panelShown()) return openComments(details.commentsToken, details.commentsText);
+    showTab("comments");
+    if (focusIt) setFocus("panel", "list");
+  }
+
+  function showChat(focusIt: boolean) {
+    if (!details?.chat) {
+      toast(details ? "This video has no live chat" : "Chat is still loading");
+      return;
+    }
+    if (!panelShown()) return openChat(details.chat, positionMs);
+    showTab("chat");
+    if (focusIt) setFocus("panel", "list");
+  }
+
+  function goLive() {
+    const d = player?.getDuration?.();
+    if (d) player.seekTo(d, true);
+    flash("● Live");
   }
 
   // ---- now playing ---------------------------------------------------------------
@@ -411,8 +467,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     titleEl.textContent = decodeEntities(current.title);
     channelBtn.textContent = current.channelTitle;
     lineEl.textContent = [current.viewsText, current.ageText].filter(Boolean).join("  ·  ");
+    lineEl.classList.toggle("live", current.live);
     descEl.textContent = current.description;
-    descEl.scrollTop = 0;
+    toggleDesc(false);
     ambient.style.backgroundImage = `url("${current.thumb}")`;
     setBackdrop(null);
     details = null;
@@ -420,6 +477,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     subscribed = null;
     syncActions();
     renderQueue();
+    showTab("next");
     loadDetails(current);
   }
 
@@ -434,7 +492,14 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         liked = d.liked;
         subscribed = d.subscribed;
         syncActions();
-        if (description) descEl.textContent = description;
+        if (description) (descEl.textContent = description), syncDescMore();
+        if (d.live) {
+          lineEl.textContent = ["LIVE", d.viewersText].filter(Boolean).join("  ·  ");
+          lineEl.classList.add("live");
+        } else if (!current.viewsText && d.viewersText) lineEl.textContent = [d.viewersText, current.ageText].filter(Boolean).join("  ·  ");
+        // Streams open on their chat, as on YouTube, unless the viewer is already in the panel.
+        if (d.live && d.chat && focus !== "panel") showTab("chat");
+        else renderTabs();
         const known = new Set(queue.map((q) => q.id));
         const fresh = related.filter((r) => !known.has(r.id));
         if (pos >= queue.length - 3 && fresh.length) {
@@ -461,13 +526,146 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   }
 
   function syncQueueFocus() {
+    const inQueue = focus === "panel" && zone === "list" && tab === "next";
     const items = queueEl.children;
-    for (let i = 0; i < items.length; i++) items[i].classList.toggle("focused", focus === "queue" && i === qIdx);
-    const target = (items[focus === "queue" ? qIdx : pos] as HTMLElement | undefined) ?? null;
+    for (let i = 0; i < items.length; i++) items[i].classList.toggle("focused", inQueue && i === qIdx);
+    const target = (items[inQueue ? qIdx : pos] as HTMLElement | undefined) ?? null;
     if (target) {
-      const top = target.offsetTop - queueEl.clientHeight * 0.35;
+      // offsetTop is measured from the panel, not the list: subtract where the list starts.
+      const top = target.offsetTop - queueEl.offsetTop - queueEl.clientHeight * 0.35;
       queueEl.scrollTo({ top, behavior: settings().reducedMotion ? "auto" : "smooth" });
     }
+  }
+
+  // ---- side panel: tabs and focus ---------------------------------------------------
+  // Tab / LS (or the ☰ menu's "Side panel") moves focus into the panel: ▲ ▼ go
+  // between its parts, ◀ ▶ along the buttons and tabs, Ⓐ activates, Ⓑ (or ◀
+  // from a part's left end) returns to the video. The mouse uses it directly.
+  const tabs = (): Tab[] => ["next", ...(details?.commentsToken ? ["comments" as const] : []), ...(details?.chat ? ["chat" as const] : [])];
+  const TAB_LABEL = (t: Tab) => (t === "next" ? "Up next" : t === "comments" ? "Comments" : details?.chat?.replay ? "Chat replay" : "Live chat");
+
+  function renderTabs() {
+    tabsEl.replaceChildren(
+      ...tabs().map((t) =>
+        h(`button.np-tab${t === tab ? ".on" : ""}`, { onclick: () => showTab(t) }, TAB_LABEL(t), t === "chat" && details?.live ? h("span.np-live-dot") : null),
+      ),
+    );
+    paintPanel();
+  }
+
+  function showTab(t: Tab) {
+    if (t !== tab || (t !== "next" && !feed)) {
+      feed?.destroy();
+      feed = null;
+      tab = t;
+      if (t === "comments" && details?.commentsToken) feed = commentsFeed(details.commentsToken);
+      else if (t === "chat" && details?.chat) feed = chatFeed(details.chat, positionMs, () => panelShown() && tab === "chat");
+      else tab = "next";
+      bodyEl.replaceChildren(feed?.el ?? queueEl);
+    }
+    renderTabs();
+    if (tab === "next") syncQueueFocus();
+  }
+
+  function paintPanel() {
+    const on = focus === "panel";
+    el.classList.toggle("panel-focus", on);
+    channelBtn.classList.toggle("pfocus", on && zone === "channel");
+    actButtons.forEach((b, i) => b.classList.toggle("pfocus", on && zone === "actions" && i === actIdx));
+    descEl.classList.toggle("pfocus", on && zone === "desc");
+    const ts = tabs();
+    [...tabsEl.children].forEach((b, i) => b.classList.toggle("pfocus", on && zone === "tabs" && ts[i] === tab));
+    feed?.setActive(on && zone === "list");
+    syncQueueFocus();
+  }
+
+  function setFocus(f: "video" | "panel", z: Zone = zone) {
+    focus = f;
+    zone = z;
+    if (f === "panel" && z === "list" && tab === "next") qIdx = Math.min(queue.length - 1, pos + 1);
+    paintPanel();
+  }
+
+  function enterPanel() {
+    if (mini) return;
+    if (layout === "theater") setLayout("split");
+    setFocus("panel", "actions");
+  }
+
+  const zones = (): Zone[] => ["channel", "actions", ...(descEl.textContent ? ["desc" as const] : []), "tabs", "list"];
+  function moveZone(d: 1 | -1) {
+    const zs = zones();
+    const i = Math.max(0, Math.min(zs.length - 1, zs.indexOf(zone) + d));
+    setFocus("panel", zs[i]);
+  }
+
+  /** Scrolls the description a step; false once it can't scroll further that way. */
+  function scrollDesc(d: 1 | -1): boolean {
+    const max = descEl.scrollHeight - descEl.clientHeight;
+    if (d < 0 ? descEl.scrollTop <= 0 : descEl.scrollTop >= max - 1) return false;
+    descEl.scrollTop += d * Math.max(40, descEl.clientHeight * 0.6);
+    return true;
+  }
+
+  /** Side panel input; false leaves the action to the video (LB/RB, ☰, Ⓨ …). */
+  function panelAction(e: ActionEvent): boolean {
+    const a = e.action;
+    if (a === "back" || a === "panel") {
+      setFocus("video");
+      return true;
+    }
+    if (zone === "list") {
+      if (tab === "next") {
+        switch (a) {
+          case "up":
+            if (qIdx === 0) {
+              moveZone(-1);
+              return true;
+            }
+            qIdx--;
+            syncQueueFocus();
+            return true;
+          case "down":
+            qIdx = Math.min(queue.length - 1, qIdx + 1);
+            syncQueueFocus();
+            return true;
+          case "select":
+            playAt(qIdx);
+            setFocus("video");
+            return true;
+          case "alt":
+            openChannel(queue[qIdx].channelId);
+            return true;
+        }
+      } else if (feed?.onAction(e)) return true;
+    }
+    switch (a) {
+      case "up":
+      case "down": {
+        const d = a === "up" ? -1 : 1;
+        if (zone !== "desc" || !scrollDesc(d)) moveZone(d);
+        return true;
+      }
+      case "left":
+      case "right": {
+        const d = a === "left" ? -1 : 1;
+        if (zone === "actions" && actIdx + d >= 0) {
+          actIdx = Math.min(actButtons.length - 1, actIdx + d);
+          paintPanel();
+        } else if (zone === "tabs" && tabs().indexOf(tab) + d >= 0) {
+          const next = tabs()[tabs().indexOf(tab) + d];
+          if (next) showTab(next);
+        } else if (d < 0) setFocus("video");
+        return true;
+      }
+      case "select":
+        if (zone === "channel") openChannel(current.channelId);
+        else if (zone === "actions") actButtons[actIdx].click();
+        else if (zone === "desc") toggleDesc();
+        else if (zone === "tabs") setFocus("panel", "list");
+        return true;
+    }
+    return false;
   }
 
   // ---- playback settings (☰) ------------------------------------------------------
@@ -508,9 +706,29 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       {
         label: "Comments",
         value: () => details?.commentsText ?? "",
-        help: "Read what people are saying about this video.",
-        select: leave(showComments),
+        help: "Read what people are saying about this video, and the replies to each comment.",
+        select: leave(() => showComments(true)),
       },
+      ...(details?.chat
+        ? [
+            {
+              label: details.chat.replay ? "Chat replay" : "Live chat",
+              help: details.chat.replay
+                ? "The stream's chat, replayed in step with the video."
+                : "Read the live chat and, when the stream allows it, write in it.",
+              select: leave(() => showChat(true)),
+            },
+          ]
+        : []),
+      ...(details?.live
+        ? [
+            {
+              label: "Go live",
+              help: "Jump to the live edge of the stream.",
+              select: leave(goLive),
+            },
+          ]
+        : []),
       {
         label: "Subscribe",
         value: () => (subscribed === null ? "" : subscribed ? "Subscribed" : "—"),
@@ -582,13 +800,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         adjust: () => setLayout(layout === "split" ? "theater" : "split"),
       },
       {
-        label: "Up next",
-        help: "Browse what plays next.",
-        select: () => {
-          router.closeOverlay();
-          if (layout === "theater") setLayout("split");
-          setFocus("queue");
-        },
+        label: "Side panel",
+        help: "Move into the side panel: channel, actions, description, Up next, comments and chat. Tab or a left-stick click also does this.",
+        select: leave(enterPanel),
       },
       {
         label: "Panorama settings",
@@ -652,6 +866,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         else el.querySelector(".s-value")!.textContent = v;
       });
       help.textContent = rows[idx].help;
+      // Short windows can't show every row: keep the focused one in view.
+      els[idx].scrollIntoView({ block: "nearest" });
     };
     const el: HTMLElement = h(
       "div.overlay.playback-settings",
@@ -692,18 +908,19 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     });
   }
 
-  function setFocus(f: "video" | "queue") {
-    focus = f;
-    el.classList.toggle("queue-focus", f === "queue");
-    qIdx = f === "queue" ? Math.min(queue.length - 1, pos + 1) : qIdx;
-    syncQueueFocus();
-  }
-
   function tickProgress() {
     if (!player?.getCurrentTime) return;
     const t = pendingSeek ?? player.getCurrentTime();
     const d = player.getDuration() || current.durationSec;
-    timeEl.textContent = d ? `${fmtDuration(t) || "0:00"} / ${fmtDuration(d)}` : "";
+    if (details?.live) {
+      // A stream's duration grows with it: show how far behind live this is.
+      const behind = d - t > 20;
+      timeEl.textContent = behind ? `${fmtDuration(d - t)} behind live` : "● Live";
+      timeEl.classList.toggle("live", !behind);
+    } else {
+      timeEl.textContent = d ? `${fmtDuration(t) || "0:00"} / ${fmtDuration(d)}` : "";
+      timeEl.classList.remove("live");
+    }
     barFill.style.transform = `scaleX(${d ? Math.min(1, t / d) : 0})`;
     stateEl.textContent =
       state === State.Playing ? "Playing" : state === State.Paused ? "Paused" : state === State.Buffering ? "Buffering…" : "";
@@ -957,7 +1174,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       el.classList.toggle("mini", on);
       if (on) {
         detachInput();
-        if (focus === "queue") setFocus("video");
+        if (focus === "panel") setFocus("video");
       } else attachInput();
       sizeVideo();
       flip(videoBox, from);
@@ -983,6 +1200,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     },
     onDestroy() {
       destroyed = true;
+      feed?.destroy();
       unlistenView();
       clearInterval(progressTimer);
       clearTimeout(autoNext);
@@ -998,30 +1216,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       }
     },
     onAction(e: ActionEvent) {
-      if (focus === "queue") {
-        switch (e.action) {
-          case "up":
-            qIdx = Math.max(0, qIdx - 1);
-            syncQueueFocus();
-            return true;
-          case "down":
-            qIdx = Math.min(queue.length - 1, qIdx + 1);
-            syncQueueFocus();
-            return true;
-          case "select":
-            playAt(qIdx);
-            setFocus("video");
-            return true;
-          case "alt":
-            openChannel(queue[qIdx].channelId);
-            return true;
-          case "back":
-          case "menu":
-          case "left":
-            setFocus("video");
-            return true;
-        }
-      }
+      if (focus === "panel" && panelAction(e)) return true;
       const repeatBoost = 1 + Math.min(5, Math.floor(e.count / 4));
       switch (e.action) {
         case "select":
@@ -1055,6 +1250,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
           return true;
         case "search":
           setLayout(layout === "split" ? "theater" : "split");
+          return true;
+        case "panel":
+          if (!e.repeat) enterPanel();
           return true;
         case "menu":
           togglePlaybackSettings();

@@ -22,6 +22,15 @@ Built with **Tauri v2** (Rust + WebView2) and a framework-free TypeScript UI.
 - **Player.**
   - Two layouts: **Full**, and **Side panel**, with the video's info and Up next beside
     the video.
+  - **Side panel** works with every device: Tab or a left-stick click moves into it.
+    ▲ ▼ go between the channel, the Like / Save / Comments / Subscribe buttons, the
+    description and the Up next · Comments · Live chat tabs; ◀ ▶ move along buttons and
+    tabs; Ⓐ / Enter activates. The mouse clicks and scrolls everything directly.
+  - **Comments** with their replies: Ⓐ, Enter or a click on a comment opens its replies.
+  - **Live streams:** live chat (or a finished stream's chat replay, in step with the
+    video), Super Chats, memberships and the pinned message; writing in the chat with
+    the on-screen keyboard or a physical one; viewer count; how far behind live you are,
+    and **Go live** in the ☰ menu.
   - **Fill ultrawide screens** zooms 16:9 video to fill wide displays while keeping
     captions and controls in view.
   - Playback settings: captions, caption size, speed and quality (every quality YouTube
@@ -71,6 +80,7 @@ Everything works with only a controller, only a keyboard or only a mouse.
 | ⧉ View | `I` | Click the channel name | – | Go to the channel |
 | LB / RB | `[` `]` | Click a tab in the menu | Previous / next tab | Previous (or restart) / next video |
 | LT / RT | `,` `.` | YouTube's seek bar | – | Seek ±30 s |
+| Left-stick click | Tab | – | – | Move into the side panel (again, or Ⓑ, to leave) |
 | Right-stick click | F11 | – | Fullscreen | Fullscreen |
 
 In the player, YouTube's own keys also work: `K` play/pause, `J` / `L` seek,

@@ -82,10 +82,29 @@ export function demoResponse(endpoint: string, body: Record<string, unknown>): u
       accountPhoto: { thumbnails: [{ url: "https://i.ytimg.com/vi/aqz-KE-bpKQ/default.jpg", width: 88 }] },
     } } } } } }] };
   }
+  if (endpoint === "next" && typeof body.continuation === "string") {
+    // Comments: "c<page>" pages of threads, "r<page>" pages of replies.
+    const [kind, page] = [body.continuation[0], Number(body.continuation.slice(1))];
+    const items: unknown[] = Array.from({ length: kind === "c" ? 20 : 5 }, (_, i) => {
+      const n = page * 20 + i;
+      const comment = { commentRenderer: {
+        commentId: `${kind}${n}`, authorText: { simpleText: `@viewer${n}` }, publishedTimeText: { simpleText: `${1 + (n % 9)} days ago` },
+        contentText: { simpleText: kind === "c" ? `Demo comment ${n}.${n % 3 ? "" : "\nA longer one, over\nseveral lines."}` : `Reply ${n}` },
+        voteCount: { simpleText: String(n * 3) }, replyCount: kind === "c" && n % 4 === 0 ? 7 : 0,
+      } };
+      if (kind !== "c") return comment;
+      return { commentThreadRenderer: { comment, replies: n % 4 === 0 ? { commentRepliesRenderer: { contents: [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: "r0" } } } }] } } : undefined } };
+    });
+    if (page < (kind === "c" ? 3 : 1)) items.push({ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: `${kind}${page + 1}` } } } });
+    return { onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: items } }] };
+  }
   if (endpoint === "next") {
     return {
       contents: { twoColumnWatchNextResults: {
-        results: { results: { contents: [{ videoSecondaryInfoRenderer: { attributedDescription: { content: "Demo description from the watch page.\nIt has several lines." } } }] } },
+        results: { results: { contents: [
+          { videoSecondaryInfoRenderer: { attributedDescription: { content: "Demo description from the watch page.\nIt has several lines.\n".repeat(6) } } },
+          { itemSectionRenderer: { sectionIdentifier: "comment-item-section", contents: [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: "c0" } } } }] } },
+        ] } },
         secondaryResults: { secondaryResults: { results: feed(seed, 12).map((x) => x.richItemRenderer.content) } },
       } },
     };

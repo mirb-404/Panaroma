@@ -1282,7 +1282,10 @@ body.rail-open .stage {
 .np-desc {
   margin-top: 1rem;
   max-height: 6.5rem;
-  overflow: hidden;
+  flex: none;
+  overflow-y: auto;
+  scrollbar-width: none;
+  cursor: pointer;
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.5;
@@ -1291,12 +1294,100 @@ body.rail-open .stage {
   mask-image: linear-gradient(to bottom, #000 60%, transparent);
 }
 
-.queue-title {
-  margin: 1.6rem 0 0.8rem;
+/* Opened (click or Ⓐ): the whole description, scrolled with the wheel or ▲ ▼. */
+.np-desc.expanded {
+  max-height: 45vh;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.np-desc-more {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+  padding: 0.15rem 0;
+  color: var(--fg);
   font-size: 0.85rem;
-  letter-spacing: 0.1em;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.np-desc-more:hover {
+  text-decoration: underline;
+}
+
+.np-desc-more[hidden] {
+  display: none;
+}
+
+/* Keyboard / controller focus inside the side panel (Tab / LS). */
+.np-panel .pfocus {
+  outline: 0.15rem solid var(--ring);
+  outline-offset: 0.2rem;
+}
+
+.np-desc.pfocus {
+  border-radius: 0.3rem;
+}
+
+/* Up next · Comments · Live chat */
+.np-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1.4rem 0 0.8rem;
+}
+
+.np-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 99rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
+  transition: background 0.15s, color 0.15s;
+}
+
+.np-tab:hover {
+  color: var(--fg);
+}
+
+.np-tab.on {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--fg);
+}
+
+.np-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.np-line.live,
+.np-time.live {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.np-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Comments and chat in the side panel: the drawer's insets would waste its width. */
+.np-body .cm-item {
+  padding: 0.7rem 0.6rem;
+}
+
+.np-body .ps-help {
+  margin: 0.6rem 0.6rem 0;
+  min-height: 0;
 }
 
 .queue {
@@ -1819,6 +1910,8 @@ body.immersive .backdrop-video .preview-frame {
    nothing behind it (side panel, video) shows through. */
 .overlay.playback-settings {
   place-items: stretch end;
+  /* One screen-high row: a long feed scrolls inside the drawer instead of growing it. */
+  grid-template-rows: minmax(0, 1fr);
   background: linear-gradient(to right, transparent 45%, rgba(0, 0, 0, 0.6));
   backdrop-filter: none;
 }
@@ -2326,7 +2419,16 @@ html.reduced-motion .tut-card {
 
 /* ---- player drawers: comments, save to playlist --------------------------------- */
 
-.cm-list {
+/* A comments or chat feed: the list scrolls, its status and Chat… button stay put. */
+.feed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cm-list,
+.chat-list {
   flex: 1;
 }
 
@@ -2397,6 +2499,124 @@ html.reduced-motion .tut-card {
 .cm-icon {
   width: 0.95rem;
   height: 0.95rem;
+}
+
+.cm-item:has(.cm-replies) {
+  cursor: pointer;
+}
+
+.cm-replies {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.cm-reply {
+  margin-left: 3.3rem;
+}
+
+.cm-reply .cm-avatar {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
+.cm-more {
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* ---- live chat ---------------------------------------------------------------- */
+
+.chat-msg {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.5rem;
+  transition: background 0.15s;
+}
+
+.chat-msg.focused {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chat-avatar {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.chat-line {
+  margin: 0;
+  min-width: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.chat-author {
+  margin-right: 0.5rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.chat-amount {
+  margin-right: 0.5rem;
+  font-weight: 700;
+}
+
+.chat-paid {
+  background: rgba(255, 61, 72, 0.18);
+}
+
+.chat-member {
+  background: rgba(46, 160, 67, 0.18);
+}
+
+.chat-system .chat-line {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.chat-pinned {
+  flex: none;
+  margin-bottom: 0.5rem;
+  padding: 0.4rem 0;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-pin-label {
+  display: block;
+  padding: 0 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.chat-compose {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  padding: 0.6rem 1rem;
+  border-radius: 99rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.chat-compose:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--fg);
 }
 
 .save-row .s-value .icon {

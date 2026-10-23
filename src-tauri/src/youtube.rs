@@ -19,12 +19,15 @@ const SIGN_IN_URL: &str = "https://accounts.google.com/ServiceLogin?service=yout
 const FALLBACK_CLIENT_VERSION: &str = "2.20251010.01.00";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
 
-/// Endpoints the UI may call; anything else is refused. The second group acts
-/// on the account (save to a playlist, like, subscribe).
+/// Endpoints the UI may call; anything else is refused. The second group reads
+/// live chat; the third acts on the account (save to a playlist, like,
+/// subscribe, chat).
 const ENDPOINTS: &[&str] = &[
     "browse", "search", "next", "account/account_menu", "guide",
+    "live_chat/get_live_chat", "live_chat/get_live_chat_replay",
     "playlist/get_add_to_playlist", "browse/edit_playlist",
     "like/like", "like/removelike", "subscription/subscribe", "subscription/unsubscribe",
+    "live_chat/send_message",
 ];
 
 static CLIENT_VERSION: Mutex<Option<String>> = Mutex::new(None);
