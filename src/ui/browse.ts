@@ -71,6 +71,7 @@ export class BrowseView implements Screen {
   /** Bumped by a refresh, so rows still loading from before it are ignored. */
   private gen = 0;
   private refreshBtn?: HTMLButtonElement;
+  private refreshFocused = false;
 
   constructor(private opts: BrowseOptions) {
     this.rowsEl = h("div.rows");
@@ -85,7 +86,7 @@ export class BrowseView implements Screen {
     if (opts.refresh) {
       this.refreshBtn = h(
         "button.browse-refresh",
-        { title: "Refresh (Ⓧ / X)", onclick: () => void this.refresh() },
+        { title: "Refresh: ▲ then Ⓐ, or Ⓧ / X", onclick: () => void this.refresh() },
         icon("refresh", "icon browse-refresh-icon"),
         h("span", null, "Refresh"),
       );
@@ -105,6 +106,9 @@ export class BrowseView implements Screen {
     cancelPreview();
     await this.opts.refresh().catch(() => {});
     this.gen++;
+    // Focus lands on the first new video.
+    this.refreshFocused = false;
+    this.refreshBtn?.classList.remove("focused");
     for (const row of this.rows) row.el.remove();
     this.rows = [];
     this.r = 0;
@@ -355,11 +359,17 @@ export class BrowseView implements Screen {
     this.rows.forEach((row, i) => row.el.classList.toggle("active", i === this.r));
     const row = this.row;
     const c = row?.cards[row.idx];
+    // The pointer on a card takes focus back from Refresh.
+    if (reveal && this.refreshFocused) {
+      this.refreshFocused = false;
+      this.refreshBtn?.classList.remove("focused");
+    }
     if (c !== this.focusedEl) {
       this.focusedEl?.classList.remove("focused");
       c?.classList.add("focused");
       this.focusedEl = c;
     }
+    if (this.refreshFocused) c?.classList.remove("focused");
     if (!row) return;
 
     // Horizontal: pin the focused card to the left edge, clamped at the end.
@@ -469,9 +479,31 @@ export class BrowseView implements Screen {
     this.resizeObs.disconnect();
   }
 
+  /** ▲ from the first row lands on Refresh; Ⓐ there refreshes, ▼ goes back. */
+  private setRefreshFocus(on: boolean) {
+    this.refreshFocused = on;
+    this.refreshBtn?.classList.toggle("focused", on);
+    this.focusedEl?.classList.toggle("focused", !on);
+    cue("move");
+  }
+
   onAction(e: ActionEvent): boolean {
     if (e.action === "alt" && this.opts.refresh) {
       if (!e.repeat) void this.refresh();
+      return true;
+    }
+    if (this.refreshFocused) {
+      if (e.action === "select") {
+        if (!e.repeat) void this.refresh();
+      } else if (e.action === "down") this.setRefreshFocus(false);
+      else if (e.action === "left") {
+        this.setRefreshFocus(false);
+        return false;
+      } else return e.action === "up" || e.action === "right";
+      return true;
+    }
+    if (e.action === "up" && this.refreshBtn && this.r === 0 && !e.repeat) {
+      this.setRefreshFocus(true);
       return true;
     }
     if (this.emptyPanel && !this.rows.length) return this.emptyPanel.onAction(e);

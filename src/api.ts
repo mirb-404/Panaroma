@@ -398,40 +398,68 @@ const videosOnly = (items: Item[]) => items.filter((i): i is Video => i.kind ===
 
 // ---- public queries ---------------------------------------------------------------
 
-let homePages: Promise<Json | null>[] | null = null;
+let homeRows: Promise<Item[]>[] | null = null;
 let homeAt = 0;
+/** Every recommendation Home has shown this session: a refresh skips them. */
+const homeShown = new Set<string>();
+const HOME_ROW = 24;
+const HOME_PAGES = 10;
 
 /**
- * The signed-in Home feed, page by page. Each page is its own promise so the
- * first row renders as soon as page 1 arrives instead of waiting for all three.
- * Always fetched fresh (then kept in memory for 10 minutes): serving the
- * cached feed from the last run made every launch open on the same videos.
+ * The signed-in Home feed as three rows. Each row is its own promise so the
+ * first renders as soon as it's full instead of waiting for all three. Always
+ * fetched fresh (then kept in memory for 10 minutes): serving the cached feed
+ * from the last run made every launch open on the same videos. Videos already
+ * shown this session are skipped, reading further into the feed to fill rows.
  */
 export function homeFeedPage(n: 0 | 1 | 2): Promise<Item[]> {
-  if (!homePages || Date.now() - homeAt > 10 * MIN) {
+  if (!homeRows || Date.now() - homeAt > 10 * MIN) {
     homeAt = Date.now();
-    const first = yt("browse", { browseId: "FEwhat_to_watch" }, 0, true);
-    const next = (prev: Promise<Json | null>) =>
-      prev.then((r) => {
-        const token = r && continuationOf(r);
-        return token ? yt("browse", { continuation: token }, 10 * MIN).catch(() => null) : null;
-      });
-    const second = next(first);
-    homePages = [first, second, next(second)];
-    first.catch(() => (homePages = null));
+    homeRows = loadHomeRows(new Set(homeShown));
+    homeRows[0].catch(() => (homeRows = null));
   }
-  const seen = new Set<string>();
-  return Promise.all(homePages.slice(0, n + 1)).then((pages) => {
-    // Items already shown on earlier pages are skipped.
-    pages.slice(0, n).forEach((p) => p && homeItems(p).forEach((i) => seen.add(i.id)));
-    const page = pages[n];
-    return page ? homeItems(page).filter((i) => !seen.has(i.id)) : [];
+  return homeRows[n];
+}
+
+function loadHomeRows(exclude: Set<string>): Promise<Item[]>[] {
+  const taken = new Set<string>();
+  /** Fresh items read but not yet placed in a row. */
+  let spare: Item[] = [];
+  /** Items skipped as already shown: used only if the feed runs dry. */
+  const repeats: Item[] = [];
+  let pages = 0;
+  let page: Promise<Json | null> = yt("browse", { browseId: "FEwhat_to_watch" }, 0, true);
+  async function more(): Promise<boolean> {
+    const p = await page;
+    if (!p) return false;
+    const token = ++pages < HOME_PAGES ? continuationOf(p) : undefined;
+    page = token ? yt("browse", { continuation: token }, 10 * MIN).catch(() => null) : Promise.resolve(null);
+    for (const i of homeItems(p)) {
+      if (taken.has(i.id)) continue;
+      taken.add(i.id);
+      (exclude.has(i.id) ? repeats : spare).push(i);
+    }
+    return true;
+  }
+  let chain: Promise<unknown> = Promise.resolve();
+  return [0, 1, 2].map(() => {
+    const row = chain.then(async () => {
+      while (spare.length < HOME_ROW && (await more()));
+      // A short feed: top up with videos shown before rather than leave the row empty.
+      if (spare.length < HOME_ROW / 2) spare.push(...repeats.splice(0, HOME_ROW - spare.length));
+      const out = spare.slice(0, HOME_ROW);
+      spare = spare.slice(HOME_ROW);
+      out.forEach((i) => homeShown.add(i.id));
+      return out;
+    });
+    chain = row.catch(() => {});
+    return row;
   });
 }
 
 /** Forgets Home's feeds so the next load asks YouTube again (new or different videos). */
 export async function refreshHome(): Promise<void> {
-  homePages = null;
+  homeRows = null;
   await Promise.all(
     ["FEsubscriptions", "FEhistory", "VLWL"].map((browseId) => cacheDelete(cacheKey("browse", { browseId }))),
   );

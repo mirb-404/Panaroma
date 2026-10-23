@@ -433,6 +433,30 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     }
   }
 
+  /** Subscribing: the pill pops, a ring spreads from it, sparks fly and the bell rings. */
+  function celebrateSubscribe() {
+    if (settings().reducedMotion) return;
+    subBtn.classList.remove("celebrate");
+    void subBtn.offsetWidth; // restart the CSS animations
+    subBtn.classList.add("celebrate");
+    window.setTimeout(() => subBtn.classList.remove("celebrate"), 900);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + Math.random() * 0.4;
+      const d = 34 + Math.random() * 22;
+      const spark = h("i.sub-spark");
+      subBtn.append(spark);
+      spark
+        .animate(
+          [
+            { transform: "translate(-50%, -50%) scale(1)", opacity: 1 },
+            { transform: `translate(calc(-50% + ${Math.cos(a) * d}px), calc(-50% + ${Math.sin(a) * d}px)) scale(0.3)`, opacity: 0 },
+          ],
+          { duration: 620 + Math.random() * 200, easing: "cubic-bezier(.2,.8,.2,1)" },
+        )
+        .finished.finally(() => spark.remove());
+    }
+  }
+
   async function toggleSubscribe() {
     const v = current;
     if (!v.channelId) return;
@@ -441,6 +465,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     subscribed = on;
     syncActions();
     cue(on ? "toggleOn" : "toggleOff");
+    if (on) celebrateSubscribe();
     try {
       await api.setSubscribed(v.channelId, on, v.id, on ? details?.subscribeParams : details?.unsubscribeParams);
       toast(on ? `Subscribed to ${v.channelTitle}` : `Unsubscribed from ${v.channelTitle}`, "success");
@@ -625,6 +650,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   function paintPanel() {
     const on = focus === "panel";
     el.classList.toggle("panel-focus", on);
+    // Browsing Up next: fold the description away so more of the list shows.
+    el.classList.toggle("queue-focus", on && zone === "list" && tab === "next");
     for (const z of ["channel", "actions"] as const)
       rowButtons[z].forEach((b, i) => b.classList.toggle("pfocus", on && zone === z && i === rowIdx[z]));
     descEl.classList.toggle("pfocus", on && zone === "desc");

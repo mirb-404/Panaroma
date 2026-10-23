@@ -998,6 +998,13 @@ body.rail-open .stage {
   background: rgba(255, 255, 255, 0.16);
 }
 
+/* ▲ from the first row: Ⓐ refreshes. */
+.browse-refresh.focused {
+  background: var(--fg);
+  color: #000;
+  box-shadow: 0 0 0 0.15rem var(--ring);
+}
+
 .browse-refresh-icon {
   width: 1.05rem;
   height: 1.05rem;
@@ -1426,17 +1433,20 @@ body.immersive .browse-refresh {
   height: 1.1rem;
 }
 
-/* Subscribe: YouTube's solid white pill; once subscribed, a quiet grey one with a bell. */
+/* Subscribe: YouTube's red pill; once subscribed, a quiet grey one with a bell. */
 .np-sub {
-  padding: 0.5rem 1.15rem;
-  background: #f1f1f1;
-  color: #0f0f0f;
-  font-size: 0.9rem;
+  position: relative;
+  padding: 0.52rem 1.25rem;
+  background: #ff0033;
+  color: #fff;
+  font-size: 0.92rem;
   font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 0.3rem 1rem rgba(255, 0, 51, 0.28);
 }
 
 .np-sub:hover:not(:disabled) {
-  background: #d9d9d9;
+  background: #e6002e;
 }
 
 .np-sub .np-act-icon {
@@ -1446,6 +1456,79 @@ body.immersive .browse-refresh {
 .np-sub.on {
   background: rgba(255, 255, 255, 0.14);
   color: var(--fg);
+  box-shadow: none;
+}
+
+/* The moment of subscribing (see celebrateSubscribe). */
+.np-sub.celebrate {
+  animation: sub-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+
+.np-sub.celebrate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 0 rgba(255, 0, 51, 0.7);
+  animation: sub-ring 0.8s ease-out forwards;
+  pointer-events: none;
+}
+
+.np-sub.celebrate .np-act-icon {
+  transform-origin: 50% 10%;
+  animation: sub-bell 0.8s ease-in-out;
+}
+
+.sub-spark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: #ff0033;
+  pointer-events: none;
+}
+
+.sub-spark:nth-of-type(odd) {
+  background: #fff;
+}
+
+@keyframes sub-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.14);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes sub-ring {
+  to {
+    box-shadow: 0 0 0 1.1rem rgba(255, 0, 51, 0);
+  }
+}
+
+@keyframes sub-bell {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(18deg);
+  }
+  40% {
+    transform: rotate(-14deg);
+  }
+  60% {
+    transform: rotate(9deg);
+  }
+  80% {
+    transform: rotate(-4deg);
+  }
 }
 
 .np-sub.on:hover:not(:disabled) {
@@ -1464,7 +1547,10 @@ body.immersive .browse-refresh {
 .np-desc-card {
   display: flex;
   flex-direction: column;
-  flex: none;
+  /* On short screens the card gives up height before Up next does. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
   margin-top: 1rem;
   padding: 0.75rem 0.9rem;
   border-radius: 0.8rem;
@@ -1474,7 +1560,8 @@ body.immersive .browse-refresh {
 .np-desc {
   margin-top: 0.35rem;
   max-height: 6.5rem;
-  flex: none;
+  flex: 0 1 auto;
+  min-height: 1.5rem;
   overflow-y: auto;
   overflow-wrap: anywhere;
   scrollbar-width: none;
@@ -1530,6 +1617,18 @@ body.immersive .browse-refresh {
 .feed-takeover .np-desc-card,
 .feed-takeover .np-panel .legend {
   display: none;
+}
+
+/* Browsing Up next with ▲ ▼: the description folds away for more of the list. */
+.queue-focus .np-desc-card {
+  display: none;
+}
+
+/* Short windows: the key hints give their space to the list. */
+@media (max-height: 950px) {
+  .np-panel .legend {
+    display: none;
+  }
 }
 
 .feed-takeover .np-title {
@@ -1601,7 +1700,8 @@ body.immersive .browse-refresh {
 
 .np-body {
   flex: 1;
-  min-height: 0;
+  /* Always room for a few Up next rows, however much sits above. */
+  min-height: min(16rem, 40vh);
   display: flex;
   flex-direction: column;
 }
