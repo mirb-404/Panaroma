@@ -58,8 +58,22 @@ const ICONS = {
   comments: "M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
   add: "M10.8 4h2.4v6.8H20v2.4h-6.8V20h-2.4v-6.8H4v-2.4h6.8z",
   check: "M9.2 15.6 4.9 11.3 3.2 13l6 6L21 7.2l-1.7-1.7z",
+  refresh: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z",
   subscribe: "M12 2.5A1.5 1.5 0 0 1 13.5 4v.7a6 6 0 0 1 4.5 5.8V16l2 2v1H4v-1l2-2v-5.5a6 6 0 0 1 4.5-5.8V4A1.5 1.5 0 0 1 12 2.5zm-2.2 17.7h4.4a2.2 2.2 0 0 1-4.4 0z",
 } as const;
+
+/**
+ * Scrolls `list` just enough to show `item`, with a little of its neighbours.
+ * Instant, so held ▲ ▼ never stack up half-finished smooth scrolls.
+ */
+export function keepInView(list: HTMLElement, item: HTMLElement | null | undefined) {
+  if (!item) return;
+  const l = list.getBoundingClientRect();
+  const r = item.getBoundingClientRect();
+  const pad = Math.min(list.clientHeight * 0.15, 80);
+  if (r.top < l.top + pad) list.scrollTop += r.top - l.top - pad;
+  else if (r.bottom > l.bottom - pad) list.scrollTop += Math.min(r.bottom - l.bottom + pad, r.top - l.top - pad);
+}
 
 // ---- formatting -----------------------------------------------------------------
 

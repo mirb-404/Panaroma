@@ -4,10 +4,9 @@
 // menu (same drawer styles). Every feed takes ▲ ▼ / Ⓐ from the controller or
 // keyboard and works with the mouse alone.
 import * as api from "../api";
-import { decodeEntities, h, icon } from "../dom";
+import { decodeEntities, h, icon, keepInView } from "../dom";
 import { pointerIsActive, type ActionEvent } from "../input";
 import { router } from "../router";
-import { settings } from "../settings";
 import { cue } from "../sound";
 import { toast } from "./chrome";
 import { openTextEntry } from "./textentry";
@@ -25,12 +24,6 @@ function drawer(title: string, legend: string, ...body: HTMLElement[]): HTMLElem
     h("div.ps-panel", null, h("h2", null, title), ...body, h("p.te-legend", null, legend)),
   );
   return el;
-}
-
-function scrollToItem(list: HTMLElement, item: HTMLElement | undefined) {
-  if (!item) return;
-  const top = item.offsetTop - list.offsetTop - list.clientHeight * 0.3;
-  list.scrollTo({ top, behavior: settings().reducedMotion ? "auto" : "smooth" });
 }
 
 /** A scrolling list of comments or chat, for the side panel or a drawer. */
@@ -99,7 +92,7 @@ export function commentsFeed(token: string): Feed {
   const paint = () => rows.forEach((r, i) => r.el.classList.toggle("focused", active && i === idx));
   const sync = () => {
     paint();
-    scrollToItem(list, rows[idx]?.el);
+    keepInView(list, rows[idx]?.el);
     if (idx >= rows.length - 5) void load();
   };
 
@@ -411,12 +404,12 @@ export function chatFeed(source: api.ChatSource, positionMs: () => number, visib
       if (e.action === "up") {
         if (!shown.length || idx === 0) return false;
         idx = idx < 0 ? shown.length - 1 : idx - 1;
-        scrollToItem(list, shown[idx]);
+        keepInView(list, shown[idx]);
       } else if (e.action === "down") {
         if (idx < 0) return true;
         idx++;
         if (idx >= shown.length) ((idx = -1), toBottom());
-        else scrollToItem(list, shown[idx]);
+        else keepInView(list, shown[idx]);
       } else if (e.action === "select") {
         if (source.replay) return true;
         write();
@@ -518,7 +511,7 @@ export function openSaveTo(video: api.Video) {
         return true;
       } else return e.action === "left" || e.action === "right";
       sync();
-      scrollToItem(list, rows[idx]);
+      keepInView(list, rows[idx]);
       return true;
     },
   });

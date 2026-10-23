@@ -3,7 +3,7 @@
 // screens the 16:9 video leaves pillarbox space, which hosts the info / up-next
 // panel instead. Controller input drives the player through its public JS API.
 import * as api from "../api";
-import { decodeEntities, fmtDuration, h, icon } from "../dom";
+import { decodeEntities, fmtDuration, h, icon, keepInView } from "../dom";
 import { pointerIsActive, type ActionEvent } from "../input";
 import { flip } from "../motion";
 import { isFullscreen, isTauri, listen, openYouTube, setFullscreen } from "../platform";
@@ -127,7 +127,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   /** "panel": the keyboard or controller moves through the side panel (Tab / LS). */
   let focus: "video" | "panel" = "video";
   let zone: Zone = "actions";
-  let actIdx = 0;
+  /** Which button ◀ ▶ picked in each row of buttons. */
+  const rowIdx = { channel: 0, actions: 0 };
   let tab: Tab = "next";
   /** Comments or chat in the side panel, while that tab shows. */
   let feed: Feed | null = null;
@@ -201,8 +202,22 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   const descEl = h("p.np-desc", { "data-native-scroll": true, onclick: () => toggleDesc() });
   const descMore = h("button.np-desc-more", { hidden: true, onclick: () => toggleDesc() });
   const timeEl = h("div.np-time");
-  const barFill = h("div.np-bar-fill");
-  const bar = h("div.np-bar", null, barFill);
+  // Progress: what's buffered, what's played, and a knob at the play head. Click to seek.
+  const bar = h(
+    "div.np-bar",
+    {
+      onclick: (ev: Event) => {
+        const d = player?.getDuration?.();
+        if (!d || details?.live) return;
+        const r = bar.getBoundingClientRect();
+        player.seekTo(Math.max(0, Math.min(1, ((ev as MouseEvent).clientX - r.left) / r.width)) * d, true);
+        tickProgress();
+      },
+    },
+    h("div.np-bar-buf"),
+    h("div.np-bar-fill"),
+    h("div.np-bar-knob"),
+  );
   const stateEl = h("div.np-state");
   const queueEl = h("div.queue", { "data-native-scroll": true });
   // The viewer's account actions for the current video (also in the ☰ menu).
@@ -211,8 +226,11 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   const likeBtn = actBtn("like", () => toggleLike());
   const saveBtn = actBtn("add", () => openSaveTo(current));
   const commentsBtn = actBtn("comments", () => showComments(focus === "panel"));
-  const subBtn = actBtn("subscribe", () => toggleSubscribe());
-  const actButtons = [likeBtn, saveBtn, commentsBtn, subBtn];
+  // Subscribe sits beside the channel name, as on YouTube, and stands out from the other actions.
+  const subBtn = h("button.np-act.np-sub", { onclick: () => toggleSubscribe() }, icon("subscribe", "icon np-act-icon"), h("span"));
+  const channelButtons = [channelBtn, subBtn];
+  const actButtons = [likeBtn, saveBtn, commentsBtn];
+  const rowButtons = { channel: channelButtons, actions: actButtons };
   const actionsEl = h("div.np-actions", null, ...actButtons);
   const tabsEl = h("div.np-tabs");
   const bodyEl = h("div.np-body", null, queueEl);
@@ -229,11 +247,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     null,
     h("div.np-now", null, stateEl, timeEl, bar),
     titleEl,
-    channelBtn,
-    lineEl,
+    h("div.np-channel-row", null, ...channelButtons),
     actionsEl,
-    descEl,
-    descMore,
+    h("div.np-desc-card", null, lineEl, descEl, descMore),
     tabsEl,
     bodyEl,
     legend,
@@ -397,7 +413,9 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     set(likeBtn, liked ? "Liked" : "Like", liked);
     set(saveBtn, "Save", false);
     set(commentsBtn, details?.commentsText ? `Comments · ${details.commentsText}` : "Comments", false, !!details && !details.commentsToken);
-    set(subBtn, subscribed ? "Subscribed" : "Subscribe", !!subscribed, !current.channelId || subscribed === null);
+    // Not disabled while the state loads: Ⓐ then says so instead of doing nothing.
+    set(subBtn, subscribed ? "Subscribed" : "Subscribe", !!subscribed, !current.channelId);
+    subBtn.classList.toggle("pending", subscribed === null);
   }
 
   async function toggleLike() {
@@ -417,7 +435,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
 
   async function toggleSubscribe() {
     const v = current;
-    if (!v.channelId || subscribed === null) return;
+    if (!v.channelId) return;
+    if (subscribed === null) return toast("Checking your subscription…");
     const on = !subscribed;
     subscribed = on;
     syncActions();
@@ -463,12 +482,38 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   }
 
   // ---- now playing ---------------------------------------------------------------
+  // Links, #hashtags and timestamps stand out; a click on a timestamp seeks there.
+  const DESC_TOKEN = /(https?:\/\/\S+|#[\p{L}\p{N}_]+|\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b)/gu;
+  function setDescription(text: string) {
+    const parts = decodeEntities(text).split(DESC_TOKEN);
+    descEl.replaceChildren(
+      ...parts.map((p, i) => {
+        if (i % 2 === 0) return p;
+        if (/^\d/.test(p)) {
+          const sec = p.split(":").reduce((a, n) => a * 60 + Number(n), 0);
+          return h(
+            "span.np-desc-link.np-desc-time",
+            {
+              onclick: (ev: Event) => {
+                ev.stopPropagation();
+                player?.seekTo?.(sec, true);
+                flash(`▶  ${p}`);
+              },
+            },
+            p,
+          );
+        }
+        return h("span.np-desc-link", null, p);
+      }),
+    );
+  }
+
   function renderInfo() {
     titleEl.textContent = decodeEntities(current.title);
     channelBtn.textContent = current.channelTitle;
     lineEl.textContent = [current.viewsText, current.ageText].filter(Boolean).join("  ·  ");
     lineEl.classList.toggle("live", current.live);
-    descEl.textContent = current.description;
+    setDescription(current.description);
     toggleDesc(false);
     ambient.style.backgroundImage = `url("${current.thumb}")`;
     setBackdrop(null);
@@ -491,8 +536,18 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         details = d;
         liked = d.liked;
         subscribed = d.subscribed;
+        // The watch page doesn't always say: look the channel up in the viewer's subscriptions.
+        if (subscribed === null && v.channelId)
+          api
+            .subscribedChannels()
+            .catch(() => [])
+            .then((subs) => {
+              if (destroyed || current.id !== v.id || subscribed !== null) return;
+              subscribed = subs.some((c) => c.id === v.channelId);
+              syncActions();
+            });
         syncActions();
-        if (description) (descEl.textContent = description), syncDescMore();
+        if (description) (setDescription(description), syncDescMore());
         if (d.live) {
           lineEl.textContent = ["LIVE", d.viewersText].filter(Boolean).join("  ·  ");
           lineEl.classList.add("live");
@@ -530,11 +585,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
     const items = queueEl.children;
     for (let i = 0; i < items.length; i++) items[i].classList.toggle("focused", inQueue && i === qIdx);
     const target = (items[inQueue ? qIdx : pos] as HTMLElement | undefined) ?? null;
-    if (target) {
-      // offsetTop is measured from the panel, not the list: subtract where the list starts.
-      const top = target.offsetTop - queueEl.offsetTop - queueEl.clientHeight * 0.35;
-      queueEl.scrollTo({ top, behavior: settings().reducedMotion ? "auto" : "smooth" });
-    }
+    keepInView(queueEl, target);
   }
 
   // ---- side panel: tabs and focus ---------------------------------------------------
@@ -550,6 +601,10 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         h(`button.np-tab${t === tab ? ".on" : ""}`, { onclick: () => showTab(t) }, TAB_LABEL(t), t === "chat" && details?.live ? h("span.np-live-dot") : null),
       ),
     );
+    // Comments and chat take over the side panel: everything above the tabs folds away.
+    el.classList.toggle("feed-takeover", tab !== "next");
+    if (tab !== "next" && !zones().includes(zone)) zone = "tabs";
+    syncDescMore();
     paintPanel();
   }
 
@@ -570,8 +625,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   function paintPanel() {
     const on = focus === "panel";
     el.classList.toggle("panel-focus", on);
-    channelBtn.classList.toggle("pfocus", on && zone === "channel");
-    actButtons.forEach((b, i) => b.classList.toggle("pfocus", on && zone === "actions" && i === actIdx));
+    for (const z of ["channel", "actions"] as const)
+      rowButtons[z].forEach((b, i) => b.classList.toggle("pfocus", on && zone === z && i === rowIdx[z]));
     descEl.classList.toggle("pfocus", on && zone === "desc");
     const ts = tabs();
     [...tabsEl.children].forEach((b, i) => b.classList.toggle("pfocus", on && zone === "tabs" && ts[i] === tab));
@@ -589,10 +644,11 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
   function enterPanel() {
     if (mini) return;
     if (layout === "theater") setLayout("split");
-    setFocus("panel", "actions");
+    setFocus("panel", tab === "next" ? "actions" : "list");
   }
 
-  const zones = (): Zone[] => ["channel", "actions", ...(descEl.textContent ? ["desc" as const] : []), "tabs", "list"];
+  const zones = (): Zone[] =>
+    tab !== "next" ? ["tabs", "list"] : ["channel", "actions", ...(descEl.textContent ? ["desc" as const] : []), "tabs", "list"];
   function moveZone(d: 1 | -1) {
     const zs = zones();
     const i = Math.max(0, Math.min(zs.length - 1, zs.indexOf(zone) + d));
@@ -649,8 +705,8 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       case "left":
       case "right": {
         const d = a === "left" ? -1 : 1;
-        if (zone === "actions" && actIdx + d >= 0) {
-          actIdx = Math.min(actButtons.length - 1, actIdx + d);
+        if ((zone === "channel" || zone === "actions") && rowIdx[zone] + d >= 0) {
+          rowIdx[zone] = Math.min(rowButtons[zone].length - 1, rowIdx[zone] + d);
           paintPanel();
         } else if (zone === "tabs" && tabs().indexOf(tab) + d >= 0) {
           const next = tabs()[tabs().indexOf(tab) + d];
@@ -659,8 +715,7 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
         return true;
       }
       case "select":
-        if (zone === "channel") openChannel(current.channelId);
-        else if (zone === "actions") actButtons[actIdx].click();
+        if (zone === "channel" || zone === "actions") rowButtons[zone][rowIdx[zone]].click();
         else if (zone === "desc") toggleDesc();
         else if (zone === "tabs") setFocus("panel", "list");
         return true;
@@ -918,10 +973,13 @@ export function playerScreen(first: api.Video, queue: api.Video[], startAt = 0, 
       timeEl.textContent = behind ? `${fmtDuration(d - t)} behind live` : "● Live";
       timeEl.classList.toggle("live", !behind);
     } else {
-      timeEl.textContent = d ? `${fmtDuration(t) || "0:00"} / ${fmtDuration(d)}` : "";
+      timeEl.replaceChildren(...(d ? [h("span.np-time-now", null, fmtDuration(t) || "0:00"), ` / ${fmtDuration(d)}`] : []));
       timeEl.classList.remove("live");
     }
-    barFill.style.transform = `scaleX(${d ? Math.min(1, t / d) : 0})`;
+    bar.style.setProperty("--p", String(d ? Math.min(1, t / d) : 0));
+    bar.style.setProperty("--b", String(player.getVideoLoadedFraction?.() ?? 0));
+    bar.classList.toggle("live", !!details?.live);
+    el.dataset.state = state === State.Playing ? "playing" : state === State.Buffering ? "buffering" : "paused";
     stateEl.textContent =
       state === State.Playing ? "Playing" : state === State.Paused ? "Paused" : state === State.Buffering ? "Buffering…" : "";
   }

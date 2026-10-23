@@ -974,6 +974,44 @@ body.rail-open .stage {
   transition: opacity 0.3s;
 }
 
+/* Home: Refresh, under the clock. Spins while the rows reload. */
+.browse-refresh {
+  position: absolute;
+  z-index: 3;
+  top: 4.6rem;
+  right: var(--gutter);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.95rem;
+  border-radius: 99rem;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  color: var(--fg);
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.browse-refresh:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.browse-refresh-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.browse-refresh.busy .browse-refresh-icon {
+  animation: spin 0.9s linear infinite;
+}
+
+body.immersive .browse-refresh {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ---- search ------------------------------------------------------------------------ */
 
 .search-bar {
@@ -1170,7 +1208,10 @@ body.rail-open .stage {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.55));
+  /* A quiet dark surface over the ambient glow, set off by a hairline. */
+  background: rgba(10, 10, 14, 0.72);
+  backdrop-filter: blur(28px) saturate(1.3);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.07);
   transition: opacity 0.35s var(--ease), transform 0.4s var(--ease);
 }
 
@@ -1180,41 +1221,134 @@ body.rail-open .stage {
   pointer-events: none;
 }
 
+/* Now playing: state and time on one line, the progress bar under them. */
 .np-now {
   display: grid;
   grid-template-columns: 1fr auto;
-  row-gap: 0.6rem;
-  margin-bottom: 1.8rem;
+  align-items: center;
+  row-gap: 0.75rem;
+  margin-bottom: 1.6rem;
+  padding-bottom: 1.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   font-variant-numeric: tabular-nums;
 }
 
 .np-state {
-  font-weight: 700;
-  font-size: 0.85rem;
-  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
+/* Status light: lit while playing, hollow while paused, blinking while buffering. */
+.np-state::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+
+[data-state="playing"] .np-state {
+  color: var(--fg);
+}
+
+[data-state="playing"] .np-state::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255, 61, 72, 0.22);
+}
+
+[data-state="buffering"] .np-state::before {
+  animation: np-blink 1s steps(2, jump-none) infinite;
+}
+
+@keyframes np-blink {
+  to {
+    opacity: 0.25;
+  }
+}
+
 .np-time {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   color: var(--muted);
 }
 
+.np-time-now {
+  color: var(--fg);
+  font-weight: 600;
+}
+
 .np-bar {
+  --p: 0;
+  --b: 0;
+  position: relative;
   grid-column: 1 / -1;
-  height: 0.3rem;
+  height: 0.28rem;
   border-radius: 99rem;
-  background: rgba(255, 255, 255, 0.18);
-  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: height 0.15s var(--ease);
+}
+
+/* A taller hit area than the bar itself. */
+.np-bar::after {
+  content: "";
+  position: absolute;
+  inset: -0.5rem 0;
+}
+
+.np-bar:hover {
+  height: 0.42rem;
+}
+
+.np-bar-buf,
+.np-bar-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform-origin: left;
+  transition: transform 0.25s linear;
+}
+
+.np-bar-buf {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scaleX(var(--b));
 }
 
 .np-bar-fill {
-  height: 100%;
   background: var(--accent);
-  transform-origin: left;
-  transform: scaleX(0);
-  transition: transform 0.25s linear;
+  transform: scaleX(var(--p));
+}
+
+.np-bar-knob {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--p) * 100%);
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 0.2rem rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%) scale(0.8);
+  transition: left 0.25s linear, transform 0.15s var(--ease);
+}
+
+.np-bar:hover .np-bar-knob {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* A stream has no fixed end: no knob, no seeking by click. */
+.np-bar.live {
+  cursor: default;
+}
+
+.np-bar.live .np-bar-knob {
+  display: none;
 }
 
 .np-title {
@@ -1227,17 +1361,30 @@ body.rail-open .stage {
   overflow: hidden;
 }
 
-.np-channel {
-  margin-top: 0.7rem;
-  align-self: flex-start;
-  font-weight: 700;
-  font-size: 1.05rem;
+/* Channel name with its Subscribe button, as on YouTube. */
+.np-channel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  margin-top: 0.8rem;
 }
 
+.np-channel {
+  font-weight: 700;
+  font-size: 1.05rem;
+  border-radius: 0.3rem;
+}
+
+.np-channel:hover {
+  text-decoration: underline;
+}
+
+/* Views · age, at the top of the description card. */
 .np-line {
-  margin-top: 0.3rem;
-  color: var(--muted);
+  color: var(--fg);
   font-size: 0.9rem;
+  font-weight: 600;
 }
 
 /* Account actions under the title: Like, Save, Comments, Subscribe. */
@@ -1279,16 +1426,62 @@ body.rail-open .stage {
   height: 1.1rem;
 }
 
-.np-desc {
+/* Subscribe: YouTube's solid white pill; once subscribed, a quiet grey one with a bell. */
+.np-sub {
+  padding: 0.5rem 1.15rem;
+  background: #f1f1f1;
+  color: #0f0f0f;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.np-sub:hover:not(:disabled) {
+  background: #d9d9d9;
+}
+
+.np-sub .np-act-icon {
+  display: none;
+}
+
+.np-sub.on {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--fg);
+}
+
+.np-sub.on:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.np-sub.on .np-act-icon {
+  display: block;
+}
+
+.np-sub.pending {
+  opacity: 0.6;
+}
+
+/* Description: a card, like YouTube's, with views · age on top. */
+.np-desc-card {
+  display: flex;
+  flex-direction: column;
+  flex: none;
   margin-top: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.np-desc {
+  margin-top: 0.35rem;
   max-height: 6.5rem;
   flex: none;
   overflow-y: auto;
+  overflow-wrap: anywhere;
   scrollbar-width: none;
   cursor: pointer;
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.5;
+  color: rgba(243, 243, 246, 0.85);
+  font-size: 0.92rem;
+  line-height: 1.55;
   white-space: pre-line;
   -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
   mask-image: linear-gradient(to bottom, #000 60%, transparent);
@@ -1319,6 +1512,35 @@ body.rail-open .stage {
   display: none;
 }
 
+.np-desc-link {
+  color: #3ea6ff;
+}
+
+.np-desc-time {
+  cursor: pointer;
+}
+
+.np-desc-time:hover {
+  text-decoration: underline;
+}
+
+/* Comments or chat open: they take the whole side panel below the title. */
+.feed-takeover .np-channel-row,
+.feed-takeover .np-actions,
+.feed-takeover .np-desc-card,
+.feed-takeover .np-panel .legend {
+  display: none;
+}
+
+.feed-takeover .np-title {
+  -webkit-line-clamp: 1;
+  font-size: 1.2rem;
+}
+
+.feed-takeover .np-tabs {
+  margin-top: 0.9rem;
+}
+
 /* Keyboard / controller focus inside the side panel (Tab / LS). */
 .np-panel .pfocus {
   outline: 0.15rem solid var(--ring);
@@ -1330,23 +1552,26 @@ body.rail-open .stage {
 }
 
 /* Up next · Comments · Live chat */
+/* A segmented control: one track, the open tab raised in it. */
 .np-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin: 1.4rem 0 0.8rem;
+  align-self: flex-start;
+  gap: 0.2rem;
+  margin: 1.4rem 0 0.9rem;
+  padding: 0.2rem;
+  border-radius: 99rem;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .np-tab {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.35rem 0.85rem;
+  padding: 0.38rem 0.95rem;
   border-radius: 99rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.82rem;
+  font-weight: 600;
   color: var(--muted);
   transition: background 0.15s, color 0.15s;
 }
@@ -1358,6 +1583,7 @@ body.rail-open .stage {
 .np-tab.on {
   background: rgba(255, 255, 255, 0.14);
   color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .np-live-dot {
@@ -1405,17 +1631,39 @@ body.rail-open .stage {
   padding: 0.5rem;
   border-radius: 0.8rem;
   cursor: pointer;
-  transition: background-color 0.15s, transform 0.2s var(--ease);
+  transition: background-color 0.15s;
+}
+
+.q-item:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .q-item.focused {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.1);
   box-shadow: inset 0 0 0 0.15rem var(--ring);
-  transform: scale(1.02);
 }
 
-.q-item.playing .q-title {
-  color: var(--accent);
+/* The video that's on: a tinted row with a "Now playing" mark over its thumbnail. */
+.q-item.playing {
+  background: rgba(255, 61, 72, 0.1);
+}
+
+.q-item.playing .q-thumb::after {
+  content: "Now playing";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.q-item.playing .q-thumb .badge {
+  display: none;
 }
 
 .q-thumb {
@@ -1423,8 +1671,9 @@ body.rail-open .stage {
   width: 9rem;
   aspect-ratio: 16 / 9;
   flex: none;
-  border-radius: 0.5rem;
+  border-radius: 0.55rem;
   background: #17171d center / cover;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .q-thumb .badge {
@@ -1454,7 +1703,9 @@ body.rail-open .stage {
 }
 
 .legend {
-  margin-top: 1rem;
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   font-size: 0.75rem;
   line-height: 1.6;
   color: rgba(243, 243, 246, 0.42);

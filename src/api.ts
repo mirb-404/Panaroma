@@ -429,6 +429,14 @@ export function homeFeedPage(n: 0 | 1 | 2): Promise<Item[]> {
   });
 }
 
+/** Forgets Home's feeds so the next load asks YouTube again (new or different videos). */
+export async function refreshHome(): Promise<void> {
+  homePages = null;
+  await Promise.all(
+    ["FEsubscriptions", "FEhistory", "VLWL"].map((browseId) => cacheDelete(cacheKey("browse", { browseId }))),
+  );
+}
+
 function homeItems(page: Json): Item[] {
   const { loose, shelves } = collectWithShelves(page);
   const found = dedupe([...loose, ...shelves.flatMap((s) => s.items)]);

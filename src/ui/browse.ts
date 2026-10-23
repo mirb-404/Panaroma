@@ -33,6 +33,8 @@ export interface BrowseOptions {
   /** The equivalent youtube.com page, offered as a fallback when loading fails. */
   youtubePath?: string;
   onFocusItem?: (item: Item) => void;
+  /** Adds a Refresh button (and Ⓧ / X): drops cached feeds, then every row reloads. */
+  refresh?: () => Promise<void>;
 }
 
 interface Row {
@@ -66,6 +68,9 @@ export class BrowseView implements Screen {
   private prefetchTimer = 0;
   /** Card currently hovered for an in-card preview (non-hero screens). */
   private previewHost?: HTMLElement;
+  /** Bumped by a refresh, so rows still loading from before it are ignored. */
+  private gen = 0;
+  private refreshBtn?: HTMLButtonElement;
 
   constructor(private opts: BrowseOptions) {
     this.rowsEl = h("div.rows");
@@ -77,10 +82,40 @@ export class BrowseView implements Screen {
     }
     if (opts.header) this.rowsEl.append(opts.header);
     this.el.append(this.viewport);
+    if (opts.refresh) {
+      this.refreshBtn = h(
+        "button.browse-refresh",
+        { title: "Refresh (Ⓧ / X)", onclick: () => void this.refresh() },
+        icon("refresh", "icon browse-refresh-icon"),
+        h("span", null, "Refresh"),
+      );
+      this.el.append(this.refreshBtn);
+    }
     this.vscroll = new Spring(0, (y) => (this.rowsEl.style.transform = `translate3d(0,${-y}px,0)`), 220, 29);
     this.resizeObs = new ResizeObserver(() => this.relayout());
     this.resizeObs.observe(this.viewport);
     this.build();
+  }
+
+  /** New or different videos: forget the cached feeds and load every row again. */
+  private async refresh() {
+    if (!this.opts.refresh || this.refreshBtn?.classList.contains("busy")) return;
+    this.refreshBtn?.classList.add("busy");
+    cue("toggleOn");
+    cancelPreview();
+    await this.opts.refresh().catch(() => {});
+    this.gen++;
+    for (const row of this.rows) row.el.remove();
+    this.rows = [];
+    this.r = 0;
+    this.pending = 0;
+    this.lastErr = undefined;
+    this.focusedEl = undefined;
+    this.emptyPanel?.el.remove();
+    this.emptyPanel = undefined;
+    this.vscroll.to(0);
+    this.build();
+    this.syncFocus(true);
   }
 
   private build() {
@@ -133,14 +168,16 @@ export class BrowseView implements Screen {
     this.rows.push(row);
     this.rowsEl.append(row.el);
     this.pending++;
+    const gen = this.gen;
     spec
       .load()
       .then((items) => {
+        if (gen !== this.gen) return;
         if (!items.length) return this.removeRow(row);
         this.fill(row, items);
       })
-      .catch((err) => this.fail(row, err))
-      .finally(() => this.settle());
+      .catch((err) => gen === this.gen && this.fail(row, err))
+      .finally(() => gen === this.gen && this.settle());
     if (this.rows.length === 1) this.syncFocus();
   }
 
@@ -152,9 +189,11 @@ export class BrowseView implements Screen {
     this.rows.push(ph);
     this.rowsEl.append(ph.el);
     this.pending++;
+    const gen = this.gen;
     spec
       .load()
       .then((items) => {
+        if (gen !== this.gen) return;
         const at = this.rows.indexOf(ph);
         if (at < 0) return;
         const cols = this.columns();
@@ -171,8 +210,8 @@ export class BrowseView implements Screen {
         if (!chunks.length) this.r = Math.min(this.r, Math.max(0, this.rows.length - 1));
         this.syncFocus(true);
       })
-      .catch((err) => this.fail(ph, err))
-      .finally(() => this.settle());
+      .catch((err) => gen === this.gen && this.fail(ph, err))
+      .finally(() => gen === this.gen && this.settle());
   }
 
   /** Columns for grid rows, derived from the live card width. */
@@ -266,7 +305,8 @@ export class BrowseView implements Screen {
   }
 
   private settle() {
-    if (--this.pending > 0 || this.rows.length) return;
+    if (--this.pending <= 0) this.refreshBtn?.classList.remove("busy");
+    if (this.pending > 0 || this.rows.length) return;
     const err = this.lastErr ?? new ApiError("Nothing here yet", 0, "empty");
     if (this.opts.empty) {
       this.emptyPanel = this.opts.empty(err, this.opts.youtubePath);
@@ -430,6 +470,10 @@ export class BrowseView implements Screen {
   }
 
   onAction(e: ActionEvent): boolean {
+    if (e.action === "alt" && this.opts.refresh) {
+      if (!e.repeat) void this.refresh();
+      return true;
+    }
     if (this.emptyPanel && !this.rows.length) return this.emptyPanel.onAction(e);
     const row = this.row;
     if (!row) return false;

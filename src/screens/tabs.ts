@@ -24,6 +24,7 @@ export function homeScreen() {
     ],
     empty: errorPanel,
     youtubePath: "/",
+    refresh: api.refreshHome,
   });
 }
 
